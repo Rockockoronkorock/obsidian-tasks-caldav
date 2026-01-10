@@ -1,36 +1,22 @@
-import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import { CalDAVConfiguration } from './types';
 
-export interface MyPluginSettings {
-	mySetting: string;
-}
+/**
+ * Default settings for CalDAV Task Synchronization
+ * Based on data-model.md specification
+ */
+export const DEFAULT_SETTINGS: CalDAVConfiguration = {
+	// Connection settings
+	serverUrl: '',
+	username: '',
+	password: '',
+	calendarPath: '',
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+	// Sync settings
+	syncInterval: 60, // seconds
+	enableAutoSync: true,
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
-}
+	// Filter settings
+	excludedFolders: [],
+	excludedTags: [],
+	completedTaskAgeDays: 30
+};

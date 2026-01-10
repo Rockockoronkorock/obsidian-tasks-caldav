@@ -1,99 +1,109 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { Plugin } from 'obsidian';
+import { CalDAVConfiguration, PluginData } from './types';
+import { DEFAULT_SETTINGS } from './settings';
+import { CalDAVSettingsTab } from './ui/settingsTab';
+import { SyncScheduler } from './sync/scheduler';
 
-// Remember to rename these classes and interfaces!
+/**
+ * Main plugin class for CalDAV Task Synchronization
+ */
+export default class CalDAVTaskSyncPlugin extends Plugin {
+	settings!: CalDAVConfiguration;
+	syncScheduler: SyncScheduler | null = null;
+	private syncIntervalId: number | null = null;
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
+	/**
+	 * Plugin initialization - called when plugin is loaded
+	 */
 	async onload() {
+		console.log('Loading CalDAV Task Sync plugin');
+
+		// Load saved settings
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
+		// Add settings tab (Phase 3 - US4: T023)
+		this.addSettingTab(new CalDAVSettingsTab(this.app, this));
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
+		// Initialize sync scheduler (Phase 4 - US5: T027-T028)
+		this.syncScheduler = new SyncScheduler(
+			this.app,
+			this.settings,
+			async () => await this.performSync()
+		);
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+		// Start automatic sync if enabled
+		if (this.settings.enableAutoSync) {
+			this.syncScheduler.start();
+		}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+		// Register manual sync command (Phase 4 - US5: T029)
+		this.addCommand({
+			id: 'manual-sync',
+			name: 'Sync tasks now',
+			callback: async () => {
+				if (this.syncScheduler) {
+					await this.syncScheduler.manualSync();
 				}
-				return false;
 			}
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+		// TODO: Implement sync engine (Phase 5 - US1)
 	}
 
+	/**
+	 * Plugin cleanup - called when plugin is unloaded
+	 */
 	onunload() {
+		console.log('Unloading CalDAV Task Sync plugin');
+
+		// Stop sync scheduler
+		if (this.syncScheduler) {
+			this.syncScheduler.stop();
+		}
+
+		// Clean up sync interval (legacy)
+		if (this.syncIntervalId !== null) {
+			window.clearInterval(this.syncIntervalId);
+			this.syncIntervalId = null;
+		}
 	}
 
+	/**
+	 * Perform sync operation
+	 * @returns Number of tasks synced
+	 */
+	private async performSync(): Promise<number> {
+		// TODO: Implement in Phase 5 - US1
+		// Placeholder: return 0 for now
+		console.log('Sync operation triggered (not yet implemented)');
+		return 0;
+	}
+
+	/**
+	 * Load settings from plugin data storage
+	 */
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		const data = await this.loadData() as PluginData | null;
+
+		if (data && data.settings) {
+			this.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings);
+		} else {
+			this.settings = Object.assign({}, DEFAULT_SETTINGS);
+		}
 	}
 
+	/**
+	 * Save settings to plugin data storage
+	 */
 	async saveSettings() {
-		await this.saveData(this.settings);
-	}
-}
+		const data: PluginData = {
+			version: 1,
+			settings: this.settings,
+			syncState: {
+				mappings: {}
+			}
+		};
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+		await this.saveData(data);
 	}
 }

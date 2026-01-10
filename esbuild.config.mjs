@@ -39,6 +39,10 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
+	alias: {
+		// Replace cross-fetch with our Obsidian-compatible implementation
+		"cross-fetch": "./src/caldav/cross-fetch-replacement.ts",
+	},
 });
 
 if (prod) {
