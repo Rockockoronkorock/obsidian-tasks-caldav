@@ -11,7 +11,13 @@ import { Task, SyncMapping, SerializedSyncMapping } from '../types';
  * @returns Hash string
  */
 export function hashTaskContent(task: Task): string {
-	const content = `${task.description}|${task.dueDate?.toISOString() ?? 'null'}|${task.status}`;
+	// Normalize date to just the date portion (no time/timezone issues)
+	// This ensures consistent hashing regardless of when the task is loaded
+	const dateString = task.dueDate
+		? `${task.dueDate.getUTCFullYear()}-${String(task.dueDate.getUTCMonth() + 1).padStart(2, '0')}-${String(task.dueDate.getUTCDate()).padStart(2, '0')}`
+		: 'null';
+
+	const content = `${task.description}|${dateString}|${task.status}`;
 
 	// Simple string hash (djb2 algorithm)
 	let hash = 5381;
@@ -42,7 +48,9 @@ export function loadMappings(serializedMappings: Record<string, SerializedSyncMa
 			lastSyncTimestamp: new Date(serialized.lastSyncTimestamp),
 			lastKnownContentHash: serialized.lastKnownContentHash,
 			lastKnownObsidianModified: new Date(serialized.lastKnownObsidianModified),
-			lastKnownCalDAVModified: new Date(serialized.lastKnownCalDAVModified)
+			lastKnownCalDAVModified: new Date(serialized.lastKnownCalDAVModified),
+			caldavEtag: serialized.caldavEtag || '',
+			caldavHref: serialized.caldavHref || ''
 		};
 
 		mappings.set(blockId, mapping);
@@ -63,7 +71,9 @@ export function saveMappings(): Record<string, SerializedSyncMapping> {
 			lastSyncTimestamp: mapping.lastSyncTimestamp.toISOString(),
 			lastKnownContentHash: mapping.lastKnownContentHash,
 			lastKnownObsidianModified: mapping.lastKnownObsidianModified.toISOString(),
-			lastKnownCalDAVModified: mapping.lastKnownCalDAVModified.toISOString()
+			lastKnownCalDAVModified: mapping.lastKnownCalDAVModified.toISOString(),
+			caldavEtag: mapping.caldavEtag,
+			caldavHref: mapping.caldavHref
 		};
 	}
 

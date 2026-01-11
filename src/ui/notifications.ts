@@ -14,25 +14,35 @@ export function showSyncStart(): void {
 
 /**
  * Show sync success notification
- * @param taskCount Number of tasks synced
+ * @param message Success message or task count
  */
-export function showSyncSuccess(taskCount: number): void {
-	new Notice(`✓ Synced ${taskCount} task${taskCount !== 1 ? 's' : ''}`);
+export function showSyncSuccess(message: string | number): void {
+	if (typeof message === 'number') {
+		new Notice(`✓ Synced ${message} task${message !== 1 ? 's' : ''}`);
+	} else {
+		new Notice(`✓ ${message}`);
+	}
 }
 
 /**
  * Show sync error notification
- * @param app The Obsidian app instance
  * @param error Error message
+ * @param details Array of detailed error messages
+ * @param app Optional app instance for modal errors
  * @param isAutoSync Whether this was an automatic sync
  */
-export function showSyncError(app: App, error: string, isAutoSync: boolean = false): void {
-	if (isAutoSync) {
+export function showSyncError(error: string, details: string[] = [], app?: App, isAutoSync: boolean = false): void {
+	if (isAutoSync && app) {
 		// For automatic sync errors, show modal to be more visible
-		new SyncErrorModal(app, error).open();
+		new SyncErrorModal(app, error, details).open();
 	} else {
 		// For manual sync errors, show notice
-		new Notice(`✗ Sync failed: ${error}`, 5000);
+		let errorMsg = `✗ ${error}`;
+		if (details.length > 0 && details.length <= 3) {
+			// Show first few errors inline
+			errorMsg += '\n' + details.slice(0, 3).join('\n');
+		}
+		new Notice(errorMsg, 8000);
 	}
 }
 
@@ -41,10 +51,12 @@ export function showSyncError(app: App, error: string, isAutoSync: boolean = fal
  */
 class SyncErrorModal extends Modal {
 	error: string;
+	details: string[];
 
-	constructor(app: App, error: string) {
+	constructor(app: App, error: string, details: string[] = []) {
 		super(app);
 		this.error = error;
+		this.details = details;
 	}
 
 	onOpen() {
@@ -54,6 +66,15 @@ class SyncErrorModal extends Modal {
 		contentEl.createEl('h2', { text: 'Automatic Sync Error' });
 		contentEl.createEl('p', { text: 'An error occurred during automatic sync:' });
 		contentEl.createEl('p', { text: this.error, cls: 'mod-error' });
+
+		if (this.details.length > 0) {
+			contentEl.createEl('p', { text: 'Details:' });
+			const detailsList = contentEl.createEl('ul');
+			this.details.forEach(detail => {
+				detailsList.createEl('li', { text: detail, cls: 'mod-warning' });
+			});
+		}
+
 		contentEl.createEl('p', { text: 'Please check your CalDAV connection settings.' });
 
 		const buttonDiv = contentEl.createDiv({ cls: 'modal-button-container' });

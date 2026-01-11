@@ -104,7 +104,7 @@ export class SyncScheduler {
 			console.error('Sync error:', error);
 
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-			showSyncError(this.app, errorMessage, isAutoSync);
+			showSyncError(errorMessage, [], this.app, isAutoSync);
 		}
 	}
 

@@ -5,7 +5,12 @@
 
 import { DAVClient, DAVCalendar } from "tsdav";
 import { CalDAVConfiguration, CalDAVTask, VTODOStatus } from "../types";
-import { CalDAVError, CalDAVAuthError, CalDAVNetworkError } from "./errors";
+import {
+	CalDAVError,
+	CalDAVAuthError,
+	CalDAVNetworkError,
+	CalDAVConflictError,
+} from "./errors";
 
 /**
  * Minimal tsdav client interface for our needs
@@ -14,6 +19,7 @@ interface MinimalDAVClient {
 	fetchCalendars: () => Promise<DAVCalendar[]>;
 	fetchCalendarObjects: (params: {
 		calendar: DAVCalendar;
+		filters?: any; // Custom filters for VTODO, VEVENT, etc.
 	}) => Promise<Array<{ url: string; data: string; etag?: string }>>;
 	createCalendarObject: (params: {
 		calendar: DAVCalendar;
@@ -64,6 +70,10 @@ export class CalDAVClient {
 			// Find the calendar by path
 			const calendars = await this.client.fetchCalendars();
 
+			// DEBUG
+			console.log(`Found ${calendars?.length ?? 0} calendars on server`);
+			console.log(`Calendar details:`, calendars);
+
 			// Try to match by calendar path or use first available calendar
 			if (this.config.calendarPath && calendars) {
 				this.calendar =
@@ -72,16 +82,30 @@ export class CalDAVClient {
 					) ??
 					calendars[0] ??
 					null;
+
+				console.log(
+					`Selected calendar by path "${this.config.calendarPath}":`,
+					this.calendar?.url
+				);
 			} else if (calendars) {
 				this.calendar = calendars[0] ?? null;
+				console.log(
+					`Selected first available calendar:`,
+					this.calendar?.url
+				);
 			}
 
 			if (!this.calendar) {
 				throw new CalDAVError("No calendar found on server");
 			}
+
+			console.log(`Using calendar: ${this.calendar.url}`);
+			console.log(`Calendar display name: ${this.calendar.displayName ?? 'N/A'}`);
+			console.log(`Calendar supported components:`, (this.calendar as any).components);
 		} catch (error) {
 			if (error instanceof Error) {
 				console.error("CalDAV connection error:", error.message);
+
 				// Check for authentication errors
 				if (
 					error.message.includes("401") ||
@@ -91,11 +115,23 @@ export class CalDAVClient {
 						"Authentication failed. Please check your credentials."
 					);
 				}
-				// Check for network errors
+
+				// Check for network errors - connection refused
+				if (
+					error.message.includes("ERR_CONNECTION_REFUSED") ||
+					error.message.includes("ECONNREFUSED")
+				) {
+					throw new CalDAVNetworkError(
+						`Cannot connect to server at ${this.config.serverUrl}. ` +
+							"Please ensure the CalDAV server is running and accessible."
+					);
+				}
+
+				// Check for other network errors
 				if (
 					error.message.includes("ENOTFOUND") ||
-					error.message.includes("ECONNREFUSED") ||
-					error.message.includes("Network")
+					error.message.includes("Network") ||
+					error.message.includes("ETIMEDOUT")
 				) {
 					throw new CalDAVNetworkError(
 						"Network error. Please check your server URL and internet connection."
@@ -140,14 +176,50 @@ export class CalDAVClient {
 		}
 
 		try {
+			// Create filter for VTODO items (tasks) instead of default VEVENT (events)
+			// See: https://github.com/natelindev/tsdav/issues/192
+			const vtodoFilter = {
+				'comp-filter': {
+					_attributes: { name: 'VCALENDAR' },
+					'comp-filter': {
+						_attributes: { name: 'VTODO' },
+					},
+				},
+			};
+
+			// Fetch calendar objects with VTODO filter
 			const calendarObjects = await this.client.fetchCalendarObjects({
 				calendar: this.calendar,
+				filters: vtodoFilter,
 			});
 
-			// Filter only VTODO objects
-			const todoObjects = calendarObjects.filter((obj) =>
-				obj.data.includes("BEGIN:VTODO")
+			// DEBUG
+			console.log(
+				`Fetched ${calendarObjects?.length ?? 0} calendar objects from server`
 			);
+			console.log(
+				`Raw calendar objects: ${JSON.stringify(calendarObjects)}`
+			);
+
+			// Check if we got any objects
+			if (!calendarObjects || calendarObjects.length === 0) {
+				console.warn("No VTODO objects found on server (calendar may be empty)");
+				return [];
+			}
+
+			// Since we filtered for VTODO at the fetch level, all objects should be tasks
+			// But we'll double-check to be safe
+			const todoObjects = calendarObjects.filter((obj) => {
+				const hasVTODO = obj.data && obj.data.includes("BEGIN:VTODO");
+				if (!hasVTODO) {
+					console.warn(
+						`Unexpected: object fetched with VTODO filter doesn't contain VTODO: ${obj.url}`
+					);
+				}
+				return hasVTODO;
+			});
+
+			console.log(`Found ${todoObjects.length} VTODO objects`);
 
 			return todoObjects.map((obj) => this.parseVTODOToTask(obj));
 		} catch (error) {
@@ -269,6 +341,18 @@ LAST-MODIFIED:${timestamp}`;
 END:VTODO
 END:VCALENDAR`;
 
+		// DEBUG
+		console.log("=== CalDAV Update Debug ===");
+		console.log("Updating task:", caldavUid);
+		console.log("Summary:", summary);
+		console.log("Status:", status);
+		console.log("Due:", due?.toISOString());
+		console.log("ETag:", etag);
+		console.log("URL:", href);
+		console.log("VTODO data:");
+		console.log(vtodoString);
+		console.log("===========================");
+
 		try {
 			const result = await this.client.updateCalendarObject({
 				calendarObject: {
@@ -277,6 +361,9 @@ END:VCALENDAR`;
 					etag,
 				},
 			});
+
+			// DEBUG
+			console.log("Update result:", result);
 
 			return {
 				uid: caldavUid,
@@ -288,7 +375,36 @@ END:VCALENDAR`;
 				href,
 			};
 		} catch (error) {
+			console.error("CalDAV update error:", error);
+
 			if (error instanceof Error) {
+				console.error("Error details:", {
+					message: error.message,
+					stack: error.stack,
+					name: error.name,
+				});
+
+				// T049: Handle 412 Precondition Failed (ETag conflict)
+				if (
+					error.message.includes("412") ||
+					error.message.includes("Precondition Failed")
+				) {
+					throw new CalDAVConflictError(
+						`Task was modified on server. Please sync again to get latest version.`,
+						etag
+					);
+				}
+
+				// Handle connection errors during update
+				if (
+					error.message.includes("ERR_CONNECTION_REFUSED") ||
+					error.message.includes("ECONNREFUSED")
+				) {
+					throw new CalDAVNetworkError(
+						`Cannot reach CalDAV server to update task. Server may be offline.`
+					);
+				}
+
 				throw new CalDAVError(
 					`Failed to update task: ${error.message}`
 				);

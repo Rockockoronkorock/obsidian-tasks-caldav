@@ -57,6 +57,10 @@ export interface SyncMapping {
 	lastKnownObsidianModified: Date;
 	/** Last modification timestamp from CalDAV server */
 	lastKnownCalDAVModified: Date;
+	/** ETag from CalDAV server (for optimistic concurrency) */
+	caldavEtag: string;
+	/** Full URL to the VTODO resource on the server */
+	caldavHref: string;
 }
 
 /**
@@ -113,6 +117,8 @@ export interface SerializedSyncMapping {
 	lastKnownContentHash: string;
 	lastKnownObsidianModified: string;
 	lastKnownCalDAVModified: string;
+	caldavEtag: string;
+	caldavHref: string;
 }
 
 /**

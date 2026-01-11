@@ -3,6 +3,9 @@
  * Based on research.md decision: Native Date (no external dependencies)
  */
 
+import { Task, TaskStatus } from "../types";
+import { extractBlockId } from "./blockRefManager";
+
 /**
  * Parse Tasks plugin date format: 📅 YYYY-MM-DD
  * @param line The task line to parse
@@ -59,4 +62,78 @@ export function parseCalDAVDate(isoString: string): Date | null {
  */
 export function isNewer(date1: Date, date2: Date): boolean {
 	return date1.getTime() > date2.getTime();
+}
+
+/**
+ * Parse a task line to extract task properties
+ * @param line The task line to parse
+ * @param filePath The file path containing the task
+ * @param lineNumber The line number in the file
+ * @returns Task object or null if parsing failed
+ */
+export function parseTaskLine(line: string, filePath: string, lineNumber: number): Task | null {
+	// Match task format: - [ ] or - [x] or - [X]
+	const taskMatch = line.match(/^\s*-\s+\[([ xX])\]\s*(.*)$/);
+	if (!taskMatch || !taskMatch[1] || !taskMatch[2]) {
+		return null;
+	}
+
+	const statusChar = taskMatch[1];
+	const content = taskMatch[2];
+
+	// Determine status
+	const status = statusChar === ' ' ? TaskStatus.Open : TaskStatus.Completed;
+
+	// Extract block ID (if present)
+	const blockId = extractBlockId(line) ?? '';
+
+	// Extract due date
+	const dueDate = parseTasksPluginDate(line);
+
+	// Extract tags
+	const tags = extractTags(content);
+
+	// Extract description (remove date and block reference)
+	const description = extractDescription(content);
+
+	return {
+		blockId,
+		filePath,
+		lineNumber,
+		description,
+		dueDate,
+		status,
+		rawLine: line,
+		tags
+	};
+}
+
+/**
+ * Extract inline tags from task content
+ * @param content The task content
+ * @returns Array of tags (including # symbol)
+ */
+function extractTags(content: string): string[] {
+	const tagMatches = content.matchAll(/#[\w-]+/g);
+	return Array.from(tagMatches, match => match[0]);
+}
+
+/**
+ * Extract clean description from task content
+ * Removes date markers, completion dates, and block references
+ * @param content The task content
+ * @returns Clean description
+ */
+function extractDescription(content: string): string {
+	// Remove due date marker (📅 YYYY-MM-DD)
+	let description = content.replace(/📅\s*\d{4}-\d{2}-\d{2}/g, '');
+
+	// Remove completion date marker (✅ YYYY-MM-DD)
+	description = description.replace(/✅\s*\d{4}-\d{2}-\d{2}/g, '');
+
+	// Remove block reference (^task-uuid)
+	description = description.replace(/\s*\^task-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s*$/g, '');
+
+	// Trim whitespace and collapse multiple spaces
+	return description.replace(/\s+/g, ' ').trim();
 }

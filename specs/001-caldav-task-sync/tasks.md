@@ -107,19 +107,19 @@ Single Obsidian plugin project structure at repository root:
 
 ### Implementation for User Story 1
 
--   [ ] T033 [P] [US1] Implement vault scanner in src/vault/scanner.ts: scanVaultForTasks() method using Vault.getMarkdownFiles()
--   [ ] T034 [P] [US1] Implement task parser in src/vault/taskParser.ts: parseTaskLine() method to extract description, dueDate, status, tags, blockId from markdown
--   [ ] T035 [US1] Implement block reference embedder in src/vault/blockRefManager.ts: embedBlockId() method to add ^task-uuid to task lines
--   [ ] T036 [US1] Implement task file writer in src/vault/taskWriter.ts: updateTaskLine() method to modify tasks in vault files
--   [ ] T037 [P] [US1] Implement VTODO converter in src/caldav/vtodo.ts: taskToVTODO() method to convert Task to iCalendar VTODO format
--   [ ] T038 [US1] Implement CalDAV task creation in src/caldav/client.ts: createTask() method using tsdav createCalendarObject()
--   [ ] T039 [US1] Implement sync filter in src/sync/filters.ts: SyncFilter class with shouldSync() method (placeholder, returns true for now)
--   [ ] T040 [US1] Implement initial sync logic in src/sync/engine.ts: syncObsidianToCalDAV() method
--   [ ] T041 [US1] Wire sync engine to manual sync command in src/main.ts
--   [ ] T042 [US1] Add block ID generation for untracked tasks in src/sync/engine.ts during initial sync
--   [ ] T043 [US1] Store sync mappings after successful task creation in src/sync/engine.ts
--   [ ] T044 [US1] Add error handling for failed task uploads with skip and continue logic in src/sync/engine.ts
--   [ ] T045 [US1] Add sync progress feedback using Notice API in src/sync/engine.ts
+-   [x] T033 [P] [US1] Implement vault scanner in src/vault/scanner.ts: scanVaultForTasks() method using Vault.getMarkdownFiles()
+-   [x] T034 [P] [US1] Implement task parser in src/vault/taskParser.ts: parseTaskLine() method to extract description, dueDate, status, tags, blockId from markdown
+-   [x] T035 [US1] Implement block reference embedder in src/vault/blockRefManager.ts: embedBlockId() method to add ^task-uuid to task lines
+-   [x] T036 [US1] Implement task file writer in src/vault/taskWriter.ts: updateTaskLine() method to modify tasks in vault files
+-   [x] T037 [P] [US1] Implement VTODO converter in src/caldav/vtodo.ts: taskToVTODO() method to convert Task to iCalendar VTODO format
+-   [x] T038 [US1] Implement CalDAV task creation in src/caldav/client.ts: createTask() method using tsdav createCalendarObject()
+-   [x] T039 [US1] Implement sync filter in src/sync/filters.ts: SyncFilter class with shouldSync() method (placeholder, returns true for now)
+-   [x] T040 [US1] Implement initial sync logic in src/sync/engine.ts: syncObsidianToCalDAV() method
+-   [x] T041 [US1] Wire sync engine to manual sync command in src/main.ts
+-   [x] T042 [US1] Add block ID generation for untracked tasks in src/sync/engine.ts during initial sync
+-   [x] T043 [US1] Store sync mappings after successful task creation in src/sync/engine.ts
+-   [x] T044 [US1] Add error handling for failed task uploads with skip and continue logic in src/sync/engine.ts
+-   [x] T045 [US1] Add sync progress feedback using Notice API in src/sync/engine.ts
 
 **Checkpoint**: At this point, User Story 1 should be fully functional - tasks sync from Obsidian to CalDAV
 
@@ -133,12 +133,12 @@ Single Obsidian plugin project structure at repository root:
 
 ### Implementation for User Story 2
 
--   [ ] T046 [P] [US2] Implement change detection in src/sync/engine.ts: detectObsidianChanges() method comparing current hash with lastKnownContentHash
--   [ ] T047 [US2] Implement CalDAV task update in src/caldav/client.ts: updateTask() method using tsdav updateCalendarObject() with ETag handling
--   [ ] T048 [US2] Implement update sync logic in src/sync/engine.ts: updateCalDAVTask() method
--   [ ] T049 [US2] Add ETag conflict handling in src/caldav/client.ts with retry on 412 Precondition Failed
--   [ ] T050 [US2] Update sync mapping timestamps and hashes in src/sync/engine.ts after successful update
--   [ ] T051 [US2] Integrate update detection into main sync cycle in src/sync/engine.ts
+-   [x] T046 [P] [US2] Implement change detection in src/sync/engine.ts: detectObsidianChanges() method comparing current hash with lastKnownContentHash
+-   [x] T047 [US2] Implement CalDAV task update in src/caldav/client.ts: updateTask() method using tsdav updateCalendarObject() with ETag handling
+-   [x] T048 [US2] Implement update sync logic in src/sync/engine.ts: updateCalDAVTask() method
+-   [x] T049 [US2] Add ETag conflict handling in src/caldav/client.ts with retry on 412 Precondition Failed
+-   [x] T050 [US2] Update sync mapping timestamps and hashes in src/sync/engine.ts after successful update
+-   [x] T051 [US2] Integrate update detection into main sync cycle in src/sync/engine.ts
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work - initial sync and updates from Obsidian to CalDAV
 
