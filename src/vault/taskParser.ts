@@ -22,6 +22,21 @@ export function parseTasksPluginDate(line: string): Date | null {
 }
 
 /**
+ * Parse completion date format: ✅ YYYY-MM-DD
+ * @param line The task line to parse
+ * @returns Date object or null if no date found
+ */
+export function parseCompletionDate(line: string): Date | null {
+	const match = line.match(/✅\s*(\d{4}-\d{2}-\d{2})/);
+	if (!match) {
+		return null;
+	}
+
+	// Parse as UTC date to avoid timezone issues
+	return new Date(match[1] + 'T00:00:00Z');
+}
+
+/**
  * Format Date for CalDAV (ISO 8601 date-only format: YYYYMMDD)
  * @param date The date to format
  * @returns YYYYMMDD string
@@ -90,6 +105,9 @@ export function parseTaskLine(line: string, filePath: string, lineNumber: number
 	// Extract due date
 	const dueDate = parseTasksPluginDate(line);
 
+	// Extract completion date
+	const completionDate = parseCompletionDate(line);
+
 	// Extract tags
 	const tags = extractTags(content);
 
@@ -104,7 +122,8 @@ export function parseTaskLine(line: string, filePath: string, lineNumber: number
 		dueDate,
 		status,
 		rawLine: line,
-		tags
+		tags,
+		completionDate
 	};
 }
 

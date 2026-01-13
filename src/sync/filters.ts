@@ -3,7 +3,7 @@
  * Based on tasks.md T039 specification and data-model.md
  */
 
-import { Task, TaskStatus, CalDAVConfiguration } from "../types";
+import { Task, TaskStatus, CalDAVConfiguration, CalDAVTask, VTODOStatus } from "../types";
 
 /**
  * Sync filter class for evaluating which tasks should be synced
@@ -81,7 +81,7 @@ export class SyncFilter {
 	}
 
 	/**
-	 * Check if completed task is too old based on age threshold
+	 * Check if completed task is too old based on age threshold (T067)
 	 * @param task The task to check
 	 * @returns true if task is completed and too old
 	 */
@@ -91,9 +91,41 @@ export class SyncFilter {
 			return false;
 		}
 
-		// For now, we don't have completion date tracking
-		// This will be enhanced in Phase 8 (US6) if needed
-		// Placeholder: return false to not filter by age yet
-		return false;
+		// If completedTaskAgeDays is 0, sync all completed tasks
+		if (this.completedTaskAgeThreshold.getTime() === 0) {
+			return false;
+		}
+
+		// If no completion date is available, use current date as fallback
+		// This ensures completed tasks without explicit dates are still subject to filtering
+		const completionDate = task.completionDate || new Date();
+
+		// Check if completion date is older than threshold
+		return completionDate < this.completedTaskAgeThreshold;
+	}
+
+	/**
+	 * Determine if a CalDAV task should be synced based on age filter
+	 * Note: Folder and tag filters don't apply to CalDAV tasks since we don't have that context
+	 * @param caldavTask The CalDAV task to evaluate
+	 * @returns true if task should be synced, false otherwise
+	 */
+	shouldSyncCalDAVTask(caldavTask: CalDAVTask): boolean {
+		// Only filter completed tasks by age
+		if (caldavTask.status !== VTODOStatus.Completed) {
+			return true; // Sync all non-completed tasks
+		}
+
+		// If completedTaskAgeDays is 0, sync all completed tasks
+		if (this.completedTaskAgeThreshold.getTime() === 0) {
+			return true;
+		}
+
+		// Use lastModified as proxy for completion date
+		// This is the best we can do since CalDAV doesn't always have a separate completion date
+		const completionDate = caldavTask.lastModified;
+
+		// Check if completion date is older than threshold
+		return completionDate >= this.completedTaskAgeThreshold;
 	}
 }

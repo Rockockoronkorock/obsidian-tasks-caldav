@@ -159,57 +159,103 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 	}
 
 	/**
-	 * Add filter settings section (US6: T061-T064)
+	 * Add filter settings section (US6: T061-T064, T070)
 	 */
 	private addFilterSection(containerEl: HTMLElement): void {
 		containerEl.createEl('h3', { text: 'Filter Settings' });
 
-		// Excluded Folders (T062)
+		// Info about filter logic
+		const infoEl = containerEl.createDiv({ cls: 'setting-item-description' });
+		infoEl.createEl('p', {
+			text: 'Tasks that match any exclusion filter will not be synced to CalDAV.'
+		});
+
+		// Excluded Folders (T062 with validation T070)
 		new Setting(containerEl)
 			.setName('Excluded folders')
-			.setDesc('Comma-separated list of folders to exclude (e.g., Archive/, Templates/)')
+			.setDesc('Comma-separated list of folders to exclude (must end with /). Example: Archive/, Templates/')
 			.addText(text => text
 				.setPlaceholder('Archive/, Templates/')
 				.setValue(this.plugin.settings.excludedFolders.join(', '))
 				.onChange(async (value) => {
-					this.plugin.settings.excludedFolders = value
+					// Parse and validate folder paths (T070)
+					const folders = value
 						.split(',')
 						.map(f => f.trim())
 						.filter(f => f.length > 0);
+
+					// Validate: all folders must end with '/'
+					const invalidFolders = folders.filter(f => !f.endsWith('/'));
+					if (invalidFolders.length > 0) {
+						new Notice(`Invalid folder paths (must end with /): ${invalidFolders.join(', ')}`);
+						return;
+					}
+
+					this.plugin.settings.excludedFolders = folders;
 					await this.plugin.saveSettings();
+
+					// Update filter in sync engine
+					this.updateSyncFilter();
 				}));
 
-		// Excluded Tags (T063)
+		// Excluded Tags (T063 with validation T070)
 		new Setting(containerEl)
 			.setName('Excluded tags')
-			.setDesc('Comma-separated list of tags to exclude (e.g., #private, #local-only)')
+			.setDesc('Comma-separated list of tags to exclude (must start with #). Example: #private, #local-only')
 			.addText(text => text
 				.setPlaceholder('#private, #local-only')
 				.setValue(this.plugin.settings.excludedTags.join(', '))
 				.onChange(async (value) => {
-					this.plugin.settings.excludedTags = value
+					// Parse and validate tags (T070)
+					const tags = value
 						.split(',')
 						.map(t => t.trim())
 						.filter(t => t.length > 0);
+
+					// Validate: all tags must start with '#'
+					const invalidTags = tags.filter(t => !t.startsWith('#'));
+					if (invalidTags.length > 0) {
+						new Notice(`Invalid tags (must start with #): ${invalidTags.join(', ')}`);
+						return;
+					}
+
+					this.plugin.settings.excludedTags = tags;
 					await this.plugin.saveSettings();
+
+					// Update filter in sync engine
+					this.updateSyncFilter();
 				}));
 
 		// Completed Task Age Threshold (T064)
 		new Setting(containerEl)
 			.setName('Completed task age')
-			.setDesc('Exclude completed tasks older than this many days (0 = sync all)')
+			.setDesc('Exclude completed tasks older than this many days (0 = sync all completed tasks)')
 			.addText(text => text
 				.setPlaceholder('30')
 				.setValue(String(this.plugin.settings.completedTaskAgeDays))
 				.onChange(async (value) => {
 					const days = parseInt(value);
-					if (days >= 0) {
-						this.plugin.settings.completedTaskAgeDays = days;
-						await this.plugin.saveSettings();
-					} else {
+					if (isNaN(days) || days < 0) {
 						new Notice('Completed task age must be 0 or greater');
+						return;
 					}
+
+					this.plugin.settings.completedTaskAgeDays = days;
+					await this.plugin.saveSettings();
+
+					// Update filter in sync engine
+					this.updateSyncFilter();
 				}));
+	}
+
+	/**
+	 * Update sync filter when settings change
+	 */
+	private updateSyncFilter(): void {
+		// Reinitialize sync engine's filter if engine exists
+		if (this.plugin.syncEngine) {
+			this.plugin.syncEngine.updateFilter();
+		}
 	}
 
 	/**

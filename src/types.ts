@@ -39,6 +39,8 @@ export interface Task {
 	rawLine: string;
 	/** Inline tags extracted from the task line (e.g., #work, #personal) */
 	tags: string[];
+	/** Optional completion date (parsed from ✅ YYYY-MM-DD format) */
+	completionDate: Date | null;
 }
 
 /**

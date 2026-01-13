@@ -88,3 +88,38 @@ function formatDateForTasks(date: Date): string {
 	const day = String(date.getUTCDate()).padStart(2, '0');
 	return `${year}-${month}-${day}`;
 }
+
+/**
+ * Update a task in the vault with new properties from CalDAV
+ * Implements T055: Obsidian task update for CalDAV-to-Obsidian sync
+ * @param vault The Obsidian vault instance
+ * @param task The existing task in the vault
+ * @param newDescription Updated description
+ * @param newDueDate Updated due date (or null)
+ * @param newStatus Updated status
+ */
+export async function updateTaskInVault(
+	vault: Vault,
+	task: Task,
+	newDescription: string,
+	newDueDate: Date | null,
+	newStatus: TaskStatus
+): Promise<void> {
+	// Build new task line with updated properties
+	const newLine = buildTaskLine(
+		newDescription,
+		newStatus,
+		newDueDate,
+		task.tags,
+		task.blockId
+	);
+
+	// Update the task line in the vault
+	await updateTaskLine(vault, task, newLine);
+
+	// Update task object with new values
+	task.description = newDescription;
+	task.dueDate = newDueDate;
+	task.status = newStatus;
+	task.rawLine = newLine;
+}

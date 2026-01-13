@@ -152,15 +152,15 @@ Single Obsidian plugin project structure at repository root:
 
 ### Implementation for User Story 3
 
--   [ ] T052 [P] [US3] Implement CalDAV task fetching in src/caldav/client.ts: fetchAllTasks() method using tsdav fetchCalendarObjects()
--   [ ] T053 [P] [US3] Implement VTODO parser in src/caldav/vtodo.ts: vtodoToTask() method to convert iCalendar VTODO to Task
--   [ ] T054 [US3] Implement change detection for CalDAV in src/sync/engine.ts: detectCalDAVChanges() method comparing lastModified timestamps
--   [ ] T055 [US3] Implement Obsidian task update in src/vault/taskWriter.ts: updateTaskInVault() method to modify task lines
--   [ ] T056 [US3] Implement CalDAV-to-Obsidian sync logic in src/sync/engine.ts: updateObsidianTask() method
--   [ ] T057 [US3] Implement conflict resolution in src/sync/conflictResolver.ts: resolveConflict() using last-write-wins strategy
--   [ ] T058 [US3] Integrate bidirectional sync into main sync cycle in src/sync/engine.ts
--   [ ] T059 [US3] Update sync mapping timestamps after CalDAV-to-Obsidian sync in src/sync/engine.ts
--   [ ] T060 [US3] Add conflict resolution logging in src/sync/conflictResolver.ts
+-   [x] T052 [P] [US3] Implement CalDAV task fetching in src/caldav/client.ts: fetchAllTasks() method using tsdav fetchCalendarObjects()
+-   [x] T053 [P] [US3] Implement VTODO parser in src/caldav/vtodo.ts: vtodoToTask() method to convert iCalendar VTODO to Task
+-   [x] T054 [US3] Implement change detection for CalDAV in src/sync/engine.ts: detectCalDAVChanges() method comparing lastModified timestamps
+-   [x] T055 [US3] Implement Obsidian task update in src/vault/taskWriter.ts: updateTaskInVault() method to modify task lines
+-   [x] T056 [US3] Implement CalDAV-to-Obsidian sync logic in src/sync/engine.ts: updateObsidianTask() method
+-   [x] T057 [US3] Implement conflict resolution in src/sync/conflictResolver.ts: resolveConflict() using last-write-wins strategy
+-   [x] T058 [US3] Integrate bidirectional sync into main sync cycle in src/sync/engine.ts
+-   [x] T059 [US3] Update sync mapping timestamps after CalDAV-to-Obsidian sync in src/sync/engine.ts
+-   [x] T060 [US3] Add conflict resolution logging in src/sync/conflictResolver.ts
 
 **Checkpoint**: All sync directions now work - bidirectional sync is complete
 
@@ -174,17 +174,17 @@ Single Obsidian plugin project structure at repository root:
 
 ### Implementation for User Story 6
 
--   [ ] T061 [P] [US6] Add filter settings section to src/ui/settingsTab.ts
--   [ ] T062 [US6] Add excluded folders list input in src/ui/settingsTab.ts with add/remove buttons
--   [ ] T063 [US6] Add excluded tags list input in src/ui/settingsTab.ts with add/remove buttons
--   [ ] T064 [US6] Add completed task age threshold input in src/ui/settingsTab.ts with default 30 days
--   [ ] T065 [P] [US6] Implement folder exclusion check in src/sync/filters.ts: matchesFolderExclusion() method with recursive subfolder logic
--   [ ] T066 [P] [US6] Implement tag exclusion check in src/sync/filters.ts: hasExcludedTag() method
--   [ ] T067 [P] [US6] Implement age threshold check in src/sync/filters.ts: isCompletedTooOld() method
--   [ ] T068 [US6] Update shouldSync() method in src/sync/filters.ts to apply all filters with AND logic
--   [ ] T069 [US6] Integrate SyncFilter into sync engine in src/sync/engine.ts before task upload
--   [ ] T070 [US6] Add filter validation in src/ui/settingsTab.ts: folder paths end with "/", tags start with "#"
--   [ ] T071 [US6] Add warning notification for filtered tasks in src/sync/engine.ts with count of excluded tasks
+-   [X] T061 [P] [US6] Add filter settings section to src/ui/settingsTab.ts
+-   [X] T062 [US6] Add excluded folders list input in src/ui/settingsTab.ts with add/remove buttons
+-   [X] T063 [US6] Add excluded tags list input in src/ui/settingsTab.ts with add/remove buttons
+-   [X] T064 [US6] Add completed task age threshold input in src/ui/settingsTab.ts with default 30 days
+-   [X] T065 [P] [US6] Implement folder exclusion check in src/sync/filters.ts: matchesFolderExclusion() method with recursive subfolder logic
+-   [X] T066 [P] [US6] Implement tag exclusion check in src/sync/filters.ts: hasExcludedTag() method
+-   [X] T067 [P] [US6] Implement age threshold check in src/sync/filters.ts: isCompletedTooOld() method
+-   [X] T068 [US6] Update shouldSync() method in src/sync/filters.ts to apply all filters with AND logic
+-   [X] T069 [US6] Integrate SyncFilter into sync engine in src/sync/engine.ts before task upload
+-   [X] T070 [US6] Add filter validation in src/ui/settingsTab.ts: folder paths end with "/", tags start with "#"
+-   [X] T071 [US6] Add warning notification for filtered tasks in src/sync/engine.ts with count of excluded tasks
 
 **Checkpoint**: Filter configuration is complete - users have full control over what syncs
 
@@ -194,6 +194,7 @@ Single Obsidian plugin project structure at repository root:
 
 **Purpose**: Improvements that affect multiple user stories
 
+-   [ ] Refactor code especially `engine.ts` for better readability.
 -   [ ] T072 [P] Add comprehensive error handling for network failures across all sync operations in src/sync/engine.ts
 -   [ ] T073 [P] Implement retry logic with exponential backoff in src/caldav/client.ts using withRetry() wrapper
 -   [ ] T074 [P] Add sync state preservation on errors in src/sync/engine.ts (atomic operations, rollback on failure)

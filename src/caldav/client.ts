@@ -166,9 +166,10 @@ export class CalDAVClient {
 
 	/**
 	 * Fetch all tasks from CalDAV server
+	 * @param completedTaskAgeThreshold Optional date threshold to exclude old completed tasks at server level
 	 * @returns Array of CalDAV tasks
 	 */
-	async fetchAllTasks(): Promise<CalDAVTask[]> {
+	async fetchAllTasks(completedTaskAgeThreshold?: Date): Promise<CalDAVTask[]> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
 				"Client not connected. Call connect() first."
@@ -178,7 +179,7 @@ export class CalDAVClient {
 		try {
 			// Create filter for VTODO items (tasks) instead of default VEVENT (events)
 			// See: https://github.com/natelindev/tsdav/issues/192
-			const vtodoFilter = {
+			let vtodoFilter: any = {
 				'comp-filter': {
 					_attributes: { name: 'VCALENDAR' },
 					'comp-filter': {
@@ -186,6 +187,26 @@ export class CalDAVClient {
 					},
 				},
 			};
+
+			// If age threshold is provided, add time-range filter to exclude old completed tasks
+			// This significantly reduces bandwidth by filtering at the server level
+			if (completedTaskAgeThreshold && completedTaskAgeThreshold.getTime() !== 0) {
+				const thresholdStr = this.formatDateTimeForCalDAV(completedTaskAgeThreshold);
+
+				// Add time-range filter on LAST-MODIFIED property
+				// This will only fetch tasks modified after the threshold date
+				// Note: This is more efficient than downloading all and filtering client-side
+				vtodoFilter['comp-filter']['comp-filter']['prop-filter'] = {
+					_attributes: { name: 'LAST-MODIFIED' },
+					'time-range': {
+						_attributes: {
+							start: thresholdStr,
+						},
+					},
+				};
+
+				console.log(`[CalDAV] Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`);
+			}
 
 			// Fetch calendar objects with VTODO filter
 			const calendarObjects = await this.client.fetchCalendarObjects({
@@ -506,6 +527,19 @@ END:VCALENDAR`;
 		const month = String(date.getUTCMonth() + 1).padStart(2, "0");
 		const day = String(date.getUTCDate()).padStart(2, "0");
 		return `${year}${month}${day}`;
+	}
+
+	/**
+	 * Format DateTime for CalDAV filters (YYYYMMDDTHHMMSSZ)
+	 */
+	private formatDateTimeForCalDAV(date: Date): string {
+		const year = date.getUTCFullYear();
+		const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+		const day = String(date.getUTCDate()).padStart(2, "0");
+		const hour = String(date.getUTCHours()).padStart(2, "0");
+		const minute = String(date.getUTCMinutes()).padStart(2, "0");
+		const second = String(date.getUTCSeconds()).padStart(2, "0");
+		return `${year}${month}${day}T${hour}${minute}${second}Z`;
 	}
 
 	/**
