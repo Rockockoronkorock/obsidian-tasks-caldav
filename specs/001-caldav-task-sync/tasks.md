@@ -194,13 +194,13 @@ Single Obsidian plugin project structure at repository root:
 
 **Purpose**: Improvements that affect multiple user stories
 
--   [ ] Refactor code especially `engine.ts` for better readability.
--   [ ] T072 [P] Add comprehensive error handling for network failures across all sync operations in src/sync/engine.ts
--   [ ] T073 [P] Implement retry logic with exponential backoff in src/caldav/client.ts using withRetry() wrapper
--   [ ] T074 [P] Add sync state preservation on errors in src/sync/engine.ts (atomic operations, rollback on failure)
--   [ ] T075 [P] Implement automatic retry on next interval after sync failure in src/sync/scheduler.ts
--   [ ] T076 [P] Add detailed logging throughout sync process in src/sync/engine.ts for debugging
--   [ ] T077 [P] Optimize vault scanning for large vaults in src/vault/scanner.ts (batch processing, skip binary files)
+-   [X] Refactor code especially `engine.ts` for better readability.
+-   [X] T072 [P] Add comprehensive error handling for network failures across all sync operations in src/sync/engine.ts
+-   [X] T073 [P] Implement retry logic with exponential backoff in src/caldav/client.ts using withRetry() wrapper
+-   [X] T074 [P] Add sync state preservation on errors in src/sync/engine.ts (atomic operations, rollback on failure)
+-   [X] T075 [P] Implement automatic retry on next interval after sync failure in src/sync/scheduler.ts
+-   [X] T076 [P] Add detailed logging throughout sync process in src/sync/engine.ts for debugging
+-   [X] T077 [P] Optimize vault scanning for large vaults in src/vault/scanner.ts (batch processing, skip binary files)
 -   [ ] T078 [P] Add input validation for all settings fields in src/ui/settingsTab.ts
 -   [ ] T079 [P] Update README.md with setup instructions, CalDAV server compatibility, privacy policy, and usage guide
 -   [ ] T080 [P] Add JSDoc comments to all public interfaces and methods in src/types.ts, src/caldav/client.ts, src/sync/engine.ts

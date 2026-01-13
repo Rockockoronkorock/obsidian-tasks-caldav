@@ -1,11 +1,13 @@
 /**
  * Sync scheduler for automatic synchronization
  * Implements US5: T027-T030
+ * Implements T075: Automatic retry on next interval after sync failure
  */
 
 import { App } from 'obsidian';
 import { CalDAVConfiguration } from '../types';
 import { showSyncStart, showSyncSuccess, showSyncError } from '../ui/notifications';
+import { Logger } from './logger';
 
 /**
  * Callback type for sync operations
@@ -14,6 +16,7 @@ export type SyncCallback = () => Promise<number>;
 
 /**
  * Manages automatic sync scheduling and manual triggers
+ * Implements T075: Automatic retry on next interval
  */
 export class SyncScheduler {
 	private intervalId: number | null = null;
@@ -21,6 +24,9 @@ export class SyncScheduler {
 	private syncCallback: SyncCallback;
 	private isRunning: boolean = false;
 	private app: App;
+	private consecutiveFailures: number = 0;
+	private lastSyncTime: Date | null = null;
+	private lastErrorMessage: string | null = null;
 
 	constructor(app: App, config: CalDAVConfiguration, syncCallback: SyncCallback) {
 		this.app = app;
@@ -47,7 +53,7 @@ export class SyncScheduler {
 		);
 
 		this.isRunning = true;
-		console.log(`Sync scheduler started with ${this.config.syncInterval}s interval`);
+		Logger.info(`Sync scheduler started with ${this.config.syncInterval}s interval`);
 	}
 
 	/**
@@ -60,7 +66,7 @@ export class SyncScheduler {
 		}
 
 		this.isRunning = false;
-		console.log('Sync scheduler stopped');
+		Logger.info('Sync scheduler stopped');
 	}
 
 	/**
@@ -85,6 +91,7 @@ export class SyncScheduler {
 
 	/**
 	 * Perform sync operation with notifications
+	 * Implements T075: Automatic retry on next interval
 	 * @param isAutoSync Whether this is an automatic sync
 	 */
 	private async performSync(isAutoSync: boolean): Promise<void> {
@@ -93,18 +100,41 @@ export class SyncScheduler {
 				showSyncStart();
 			}
 
+			// Attempt sync
 			const taskCount = await this.syncCallback();
+
+			// Success! Reset failure counter
+			if (this.consecutiveFailures > 0) {
+				Logger.info(`Sync recovered after ${this.consecutiveFailures} consecutive failures`);
+				this.consecutiveFailures = 0;
+				this.lastErrorMessage = null;
+			}
+
+			this.lastSyncTime = new Date();
 
 			if (!isAutoSync) {
 				showSyncSuccess(taskCount);
 			}
 
-			console.log(`Sync completed: ${taskCount} tasks synced`);
+			Logger.debug(`Sync completed: ${taskCount} tasks synced`);
 		} catch (error) {
-			console.error('Sync error:', error);
+			// Sync failed - track failure and schedule automatic retry
+			this.consecutiveFailures++;
+			this.lastErrorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-			showSyncError(errorMessage, [], this.app, isAutoSync);
+			Logger.error(`Sync failed (${this.consecutiveFailures} consecutive failures): ${this.lastErrorMessage}`, error);
+
+			// Show error to user
+			showSyncError(this.lastErrorMessage, [], this.app, isAutoSync);
+
+			// Log that retry will happen on next interval
+			if (this.isRunning && isAutoSync) {
+				const nextRetryInSeconds = this.config.syncInterval;
+				Logger.info(`Automatic retry will occur in ${nextRetryInSeconds} seconds`);
+			}
+
+			// Note: We don't stop the scheduler - it will automatically retry on next interval
+			// This implements T075: Automatic retry on next interval after sync failure
 		}
 	}
 

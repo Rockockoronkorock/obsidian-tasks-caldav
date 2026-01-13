@@ -1,6 +1,8 @@
 /**
  * CalDAV client wrapper using tsdav
  * Based on contracts/caldav-api.md specification
+ * Implements T072: Comprehensive error handling
+ * Implements T073: Retry logic with exponential backoff
  */
 
 import { DAVClient, DAVCalendar } from "tsdav";
@@ -10,7 +12,12 @@ import {
 	CalDAVAuthError,
 	CalDAVNetworkError,
 	CalDAVConflictError,
+	CalDAVServerError,
+	CalDAVTimeoutError,
+	CalDAVRateLimitError,
 } from "./errors";
+import { withRetry } from "./retry";
+import { Logger } from "../sync/logger";
 
 /**
  * Minimal tsdav client interface for our needs
@@ -48,98 +55,120 @@ export class CalDAVClient {
 
 	/**
 	 * Connect to CalDAV server and initialize client
+	 * Implements T073: Retry logic with exponential backoff
 	 */
 	async connect(): Promise<void> {
-		try {
-			// Create DAVClient
-			const davClient = new DAVClient({
-				serverUrl: this.config.serverUrl,
-				credentials: {
-					username: this.config.username,
-					password: this.config.password,
-				},
-				authMethod: "Basic",
-				defaultAccountType: "caldav",
-			});
+		return withRetry(async () => {
+			try {
+				Logger.debug("Connecting to CalDAV server...");
 
-			// Login to establish auth
-			await davClient.login();
+				// Create DAVClient
+				const davClient = new DAVClient({
+					serverUrl: this.config.serverUrl,
+					credentials: {
+						username: this.config.username,
+						password: this.config.password,
+					},
+					authMethod: "Basic",
+					defaultAccountType: "caldav",
+				});
 
-			this.client = davClient as unknown as MinimalDAVClient;
+				// Login to establish auth
+				await davClient.login();
 
-			// Find the calendar by path
-			const calendars = await this.client.fetchCalendars();
+				this.client = davClient as unknown as MinimalDAVClient;
 
-			// DEBUG
-			console.log(`Found ${calendars?.length ?? 0} calendars on server`);
-			console.log(`Calendar details:`, calendars);
+				// Find the calendar by path
+				const calendars = await this.client.fetchCalendars();
 
-			// Try to match by calendar path or use first available calendar
-			if (this.config.calendarPath && calendars) {
-				this.calendar =
-					calendars.find((cal) =>
-						cal.url.includes(this.config.calendarPath)
-					) ??
-					calendars[0] ??
-					null;
+				Logger.debug(`Found ${calendars?.length ?? 0} calendars on server`);
 
-				console.log(
-					`Selected calendar by path "${this.config.calendarPath}":`,
-					this.calendar?.url
-				);
-			} else if (calendars) {
-				this.calendar = calendars[0] ?? null;
-				console.log(
-					`Selected first available calendar:`,
-					this.calendar?.url
-				);
-			}
+				// Try to match by calendar path or use first available calendar
+				if (this.config.calendarPath && calendars) {
+					this.calendar =
+						calendars.find((cal) =>
+							cal.url.includes(this.config.calendarPath)
+						) ??
+						calendars[0] ??
+						null;
 
-			if (!this.calendar) {
-				throw new CalDAVError("No calendar found on server");
-			}
-
-			console.log(`Using calendar: ${this.calendar.url}`);
-			console.log(`Calendar display name: ${this.calendar.displayName ?? 'N/A'}`);
-			console.log(`Calendar supported components:`, (this.calendar as any).components);
-		} catch (error) {
-			if (error instanceof Error) {
-				console.error("CalDAV connection error:", error.message);
-
-				// Check for authentication errors
-				if (
-					error.message.includes("401") ||
-					error.message.includes("Unauthorized")
-				) {
-					throw new CalDAVAuthError(
-						"Authentication failed. Please check your credentials."
+					Logger.debug(
+						`Selected calendar by path "${this.config.calendarPath}": ${this.calendar?.url}`
 					);
+				} else if (calendars) {
+					this.calendar = calendars[0] ?? null;
+					Logger.debug(`Selected first available calendar: ${this.calendar?.url}`);
 				}
 
-				// Check for network errors - connection refused
-				if (
-					error.message.includes("ERR_CONNECTION_REFUSED") ||
-					error.message.includes("ECONNREFUSED")
-				) {
-					throw new CalDAVNetworkError(
-						`Cannot connect to server at ${this.config.serverUrl}. ` +
-							"Please ensure the CalDAV server is running and accessible."
-					);
+				if (!this.calendar) {
+					throw new CalDAVError("No calendar found on server");
 				}
 
-				// Check for other network errors
-				if (
-					error.message.includes("ENOTFOUND") ||
-					error.message.includes("Network") ||
-					error.message.includes("ETIMEDOUT")
-				) {
-					throw new CalDAVNetworkError(
-						"Network error. Please check your server URL and internet connection."
-					);
-				}
+				Logger.info(`Connected to CalDAV calendar: ${this.calendar.displayName ?? this.calendar.url}`);
+			} catch (error) {
+				// Transform error into appropriate CalDAV error type
+				throw this.handleConnectionError(error);
 			}
-			throw error;
+		});
+	}
+
+	/**
+	 * Handle connection errors and convert to appropriate CalDAV error types
+	 * Implements T072: Comprehensive error handling
+	 */
+	private handleConnectionError(error: unknown): Error {
+		if (error instanceof CalDAVError) {
+			return error; // Already a CalDAV error, pass through
 		}
+
+		if (error instanceof Error) {
+			const message = error.message;
+
+			// Check for authentication errors
+			if (message.includes("401") || message.includes("Unauthorized")) {
+				return new CalDAVAuthError(
+					"Authentication failed. Please check your credentials."
+				);
+			}
+
+			// Check for network errors - connection refused
+			if (message.includes("ERR_CONNECTION_REFUSED") || message.includes("ECONNREFUSED")) {
+				return new CalDAVNetworkError(
+					`Cannot connect to server at ${this.config.serverUrl}. ` +
+					"Please ensure the CalDAV server is running and accessible."
+				);
+			}
+
+			// Check for timeout errors
+			if (message.includes("ETIMEDOUT") || message.includes("timeout")) {
+				return new CalDAVTimeoutError(
+					"Connection timed out. Please check your server URL and internet connection."
+				);
+			}
+
+			// Check for other network errors
+			if (message.includes("ENOTFOUND") || message.includes("Network")) {
+				return new CalDAVNetworkError(
+					"Network error. Please check your server URL and internet connection."
+				);
+			}
+
+			// Check for server errors
+			if (message.includes("500") || message.includes("503")) {
+				const statusMatch = message.match(/(\d{3})/);
+				const statusCode = statusMatch && statusMatch[1] ? parseInt(statusMatch[1]) : 500;
+				return new CalDAVServerError(
+					`Server error: ${message}`,
+					statusCode
+				);
+			}
+
+			// Generic CalDAV error
+			return new CalDAVError(`Connection failed: ${message}`);
+		}
+
+		// Unknown error type
+		return new CalDAVError(`Unknown connection error: ${String(error)}`);
 	}
 
 	/**
@@ -166,6 +195,7 @@ export class CalDAVClient {
 
 	/**
 	 * Fetch all tasks from CalDAV server
+	 * Implements T073: Retry logic with exponential backoff
 	 * @param completedTaskAgeThreshold Optional date threshold to exclude old completed tasks at server level
 	 * @returns Array of CalDAV tasks
 	 */
@@ -176,81 +206,110 @@ export class CalDAVClient {
 			);
 		}
 
-		try {
-			// Create filter for VTODO items (tasks) instead of default VEVENT (events)
-			// See: https://github.com/natelindev/tsdav/issues/192
-			let vtodoFilter: any = {
-				'comp-filter': {
-					_attributes: { name: 'VCALENDAR' },
+		return withRetry(async () => {
+			try {
+				Logger.debug("Fetching tasks from CalDAV server...");
+
+				// Create filter for VTODO items (tasks) instead of default VEVENT (events)
+				let vtodoFilter: any = {
 					'comp-filter': {
-						_attributes: { name: 'VTODO' },
-					},
-				},
-			};
-
-			// If age threshold is provided, add time-range filter to exclude old completed tasks
-			// This significantly reduces bandwidth by filtering at the server level
-			if (completedTaskAgeThreshold && completedTaskAgeThreshold.getTime() !== 0) {
-				const thresholdStr = this.formatDateTimeForCalDAV(completedTaskAgeThreshold);
-
-				// Add time-range filter on LAST-MODIFIED property
-				// This will only fetch tasks modified after the threshold date
-				// Note: This is more efficient than downloading all and filtering client-side
-				vtodoFilter['comp-filter']['comp-filter']['prop-filter'] = {
-					_attributes: { name: 'LAST-MODIFIED' },
-					'time-range': {
-						_attributes: {
-							start: thresholdStr,
+						_attributes: { name: 'VCALENDAR' },
+						'comp-filter': {
+							_attributes: { name: 'VTODO' },
 						},
 					},
 				};
 
-				console.log(`[CalDAV] Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`);
-			}
+				// If age threshold is provided, add time-range filter to exclude old completed tasks
+				if (completedTaskAgeThreshold && completedTaskAgeThreshold.getTime() !== 0) {
+					const thresholdStr = this.formatDateTimeForCalDAV(completedTaskAgeThreshold);
 
-			// Fetch calendar objects with VTODO filter
-			const calendarObjects = await this.client.fetchCalendarObjects({
-				calendar: this.calendar,
-				filters: vtodoFilter,
-			});
+					vtodoFilter['comp-filter']['comp-filter']['prop-filter'] = {
+						_attributes: { name: 'LAST-MODIFIED' },
+						'time-range': {
+							_attributes: {
+								start: thresholdStr,
+							},
+						},
+					};
 
-			// DEBUG
-			console.log(
-				`Fetched ${calendarObjects?.length ?? 0} calendar objects from server`
-			);
-			console.log(
-				`Raw calendar objects: ${JSON.stringify(calendarObjects)}`
-			);
-
-			// Check if we got any objects
-			if (!calendarObjects || calendarObjects.length === 0) {
-				console.warn("No VTODO objects found on server (calendar may be empty)");
-				return [];
-			}
-
-			// Since we filtered for VTODO at the fetch level, all objects should be tasks
-			// But we'll double-check to be safe
-			const todoObjects = calendarObjects.filter((obj) => {
-				const hasVTODO = obj.data && obj.data.includes("BEGIN:VTODO");
-				if (!hasVTODO) {
-					console.warn(
-						`Unexpected: object fetched with VTODO filter doesn't contain VTODO: ${obj.url}`
-					);
+					Logger.debug(`Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`);
 				}
-				return hasVTODO;
-			});
 
-			console.log(`Found ${todoObjects.length} VTODO objects`);
+				// Fetch calendar objects with VTODO filter
+				const calendarObjects = await this.client!.fetchCalendarObjects({
+					calendar: this.calendar!,
+					filters: vtodoFilter,
+				});
 
-			return todoObjects.map((obj) => this.parseVTODOToTask(obj));
-		} catch (error) {
-			if (error instanceof Error) {
-				throw new CalDAVError(
-					`Failed to fetch tasks: ${error.message}`
+				Logger.debug(`Fetched ${calendarObjects?.length ?? 0} calendar objects from server`);
+
+				// Check if we got any objects
+				if (!calendarObjects || calendarObjects.length === 0) {
+					Logger.debug("No VTODO objects found on server (calendar may be empty)");
+					return [];
+				}
+
+				// Filter for VTODO objects
+				const todoObjects = calendarObjects.filter((obj) => {
+					const hasVTODO = obj.data && obj.data.includes("BEGIN:VTODO");
+					if (!hasVTODO) {
+						Logger.warn(`Object fetched with VTODO filter doesn't contain VTODO: ${obj.url}`);
+					}
+					return hasVTODO;
+				});
+
+				Logger.debug(`Found ${todoObjects.length} VTODO objects`);
+
+				return todoObjects.map((obj) => this.parseVTODOToTask(obj));
+			} catch (error) {
+				throw this.handleNetworkError(error, "fetch tasks");
+			}
+		});
+	}
+
+	/**
+	 * Handle network errors and convert to appropriate CalDAV error types
+	 * Implements T072: Comprehensive error handling
+	 */
+	private handleNetworkError(error: unknown, operation: string): Error {
+		if (error instanceof CalDAVError) {
+			return error; // Already a CalDAV error
+		}
+
+		if (error instanceof Error) {
+			const message = error.message;
+
+			// Check for timeout
+			if (message.includes("timeout") || message.includes("ETIMEDOUT")) {
+				return new CalDAVTimeoutError(`Timeout while trying to ${operation}`);
+			}
+
+			// Check for network errors
+			if (message.includes("Network") || message.includes("ECONNREFUSED") || message.includes("ENOTFOUND")) {
+				return new CalDAVNetworkError(`Network error while trying to ${operation}: ${message}`);
+			}
+
+			// Check for server errors
+			if (message.includes("500") || message.includes("503")) {
+				const statusMatch = message.match(/(\d{3})/);
+				const statusCode = statusMatch && statusMatch[1] ? parseInt(statusMatch[1]) : 500;
+				return new CalDAVServerError(
+					`Server error while trying to ${operation}: ${message}`,
+					statusCode
 				);
 			}
-			throw error;
+
+			// Check for auth errors
+			if (message.includes("401") || message.includes("403") || message.includes("Unauthorized")) {
+				return new CalDAVAuthError(`Authentication failed while trying to ${operation}`);
+			}
+
+			// Generic error
+			return new CalDAVError(`Failed to ${operation}: ${message}`);
 		}
+
+		return new CalDAVError(`Unknown error while trying to ${operation}: ${String(error)}`);
 	}
 
 	/**

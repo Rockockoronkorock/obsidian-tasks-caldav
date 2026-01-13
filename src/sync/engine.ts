@@ -1,27 +1,18 @@
 /**
  * Sync engine for bidirectional task synchronization
  * Based on tasks.md T040-T045 specifications
+ * Refactored for Phase 9: Polish & Cross-Cutting Concerns
  */
 
-import { Vault, Notice } from "obsidian";
+import { Vault, Notice, Workspace } from "obsidian";
 import { Task, CalDAVConfiguration, SyncMapping, CalDAVTask } from "../types";
 import { CalDAVClient } from "../caldav/client";
 import { SyncFilter } from "./filters";
 import { scanVaultForTasks } from "../vault/scanner";
-import { updateTaskLine, buildTaskLine } from "../vault/taskWriter";
-import {
-	generateTaskBlockId,
-	embedBlockId,
-	hasBlockId,
-} from "../vault/blockRefManager";
+import { updateTaskLine } from "../vault/taskWriter";
+import { generateTaskBlockId, embedBlockId } from "../vault/blockRefManager";
 import { taskToVTODO } from "../caldav/vtodo";
-import {
-	hashTaskContent,
-	getMappingByBlockId,
-	setMapping,
-	saveMappings,
-	getAllMappings,
-} from "./mapping";
+import { hashTaskContent, getMappingByBlockId, setMapping } from "./mapping";
 import {
 	showSyncStart,
 	showSyncSuccess,
@@ -29,13 +20,28 @@ import {
 } from "../ui/notifications";
 import { vtodoToTask } from "../caldav/vtodo";
 import { updateTaskInVault } from "../vault/taskWriter";
-import { resolveConflict, formatConflictLog, hasConflict } from "./conflictResolver";
+import {
+	resolveConflict,
+	formatConflictLog,
+	hasConflict,
+} from "./conflictResolver";
+import { Logger } from "./logger";
+
+/**
+ * Sync statistics for tracking sync progress
+ */
+interface SyncStats {
+	successCount: number;
+	errorCount: number;
+	errors: string[];
+}
 
 /**
  * Sync engine class for orchestrating task synchronization
  */
 export class SyncEngine {
 	private vault: Vault;
+	private workspace: Workspace;
 	private config: CalDAVConfiguration;
 	private client: CalDAVClient;
 	private filter: SyncFilter;
@@ -43,10 +49,12 @@ export class SyncEngine {
 
 	constructor(
 		vault: Vault,
+		workspace: Workspace,
 		config: CalDAVConfiguration,
 		saveData: () => Promise<void>
 	) {
 		this.vault = vault;
+		this.workspace = workspace;
 		this.config = config;
 		this.client = new CalDAVClient(config);
 		this.filter = new SyncFilter(config);
@@ -64,290 +72,401 @@ export class SyncEngine {
 	/**
 	 * Perform bidirectional sync between Obsidian and CalDAV
 	 * This implements T040: Initial sync logic and T058: Bidirectional sync integration
+	 * Refactored for better readability and maintainability
 	 */
 	async syncObsidianToCalDAV(): Promise<void> {
 		showSyncStart();
+		Logger.info("Starting bidirectional sync...");
 
-		let successCount = 0;
-		let errorCount = 0;
-		const errors: string[] = [];
+		const stats: SyncStats = {
+			successCount: 0,
+			errorCount: 0,
+			errors: [],
+		};
 
 		try {
-			// DEBUG
-			console.log("Starting Obsidian to CalDAV sync...");
+			// Connect to CalDAV server
+			await this.connectToServer();
 
-			// Connect to CalDAV server with proper error handling
-			try {
-				await this.client.connect();
-			} catch (error) {
-				// Provide user-friendly error messages for connection issues
-				const errorMsg =
-					error instanceof Error ? error.message : String(error);
+			// Fetch tasks from both sources
+			const { caldavTasks, obsidianTasks } = await this.fetchAllTasks();
 
-					if (errorMsg.includes("ERR_CONNECTION_REFUSED") || errorMsg.includes("ECONNREFUSED")) {
-					throw new Error(
-						"Cannot connect to CalDAV server. Please check:\n" +
-							"1. The server URL is correct\n" +
-							"2. The CalDAV server is running\n" +
-							"3. You have network connectivity"
-					);
-				}
-
-				throw error;
-			}
-
-			// Fetch existing CalDAV tasks with server-side filtering
-			// Pass age threshold to filter old completed tasks at the CalDAV server level
-			// This is more efficient than downloading all tasks and filtering client-side
-			const ageThreshold = this.config.completedTaskAgeDays > 0
-				? (() => {
-					const threshold = new Date();
-					threshold.setDate(threshold.getDate() - this.config.completedTaskAgeDays);
-					return threshold;
-				})()
-				: undefined;
-
-			const caldavTasks = await this.client.fetchAllTasks(ageThreshold);
-
-			// DEBUG
-			console.log(
-				`Fetched ${caldavTasks.length} tasks from CalDAV server (server-side filtering applied)`
-			);
-
-			// Scan vault for tasks (T033)
-			const tasks = await scanVaultForTasks(this.vault);
-
-			// Filter tasks (T039)
-			const filteredTasks = tasks.filter((task) =>
-				this.filter.shouldSync(task)
-			);
-
-			// T071: Show warning notification for filtered tasks
-			const obsidianFilteredCount = tasks.length - filteredTasks.length;
-
-			if (obsidianFilteredCount > 0) {
-				new Notice(
-					`Found ${filteredTasks.length} tasks to sync (${obsidianFilteredCount} excluded by filters)`,
-					5000
-				);
-				console.log(`[CalDAV Sync] ${obsidianFilteredCount} Obsidian tasks excluded by filter rules`);
-			} else {
-				new Notice(`Found ${filteredTasks.length} tasks to sync`, 3000);
-			}
-
-			// Note: CalDAV tasks are filtered server-side, so we don't have a count of excluded CalDAV tasks
-			if (ageThreshold) {
-				console.log(`[CalDAV Sync] Server-side filtering active: excluding CalDAV tasks older than ${ageThreshold.toISOString()}`);
-			}
-
-			// Process each task (Obsidian to CalDAV direction)
-			for (const task of filteredTasks) {
-				try {
-					// T042: Generate block ID for untracked tasks
-					if (!task.blockId || task.blockId === "") {
-						await this.addBlockIdToTask(task);
-						// Task needs to be created on CalDAV server
-						await this.createTaskOnCalDAV(task);
-						successCount++;
-
-						continue; // Move to next task
-					} else {
-						// DEBUG
-						console.log(`Processing task with blockId: ${task.blockId}`);
-
-						// Check if task already has a mapping
-						var existingMapping = getMappingByBlockId(task.blockId);
-
-						if (!existingMapping) {
-							// DEBUG
-							console.log(
-								"No existing mapping for blockId:",
-								task.blockId
-							);
-
-							// Task has blockId but no mapping - check if it exists on CalDAV
-							const existingCalDAVTask =
-								await this.findCalDAVTaskByDescription(
-									caldavTasks,
-									task.description
-								);
-
-							// DEBUG
-							console.log(
-								"Existing CalDAV task found:",
-								existingCalDAVTask
-							);
-							if (existingCalDAVTask) {
-								// Task exists on CalDAV - reconcile by creating mapping
-								existingMapping = await this.reconcileTask(
-									task,
-									existingCalDAVTask
-								);
-								successCount++;
-							} else {
-								continue; // No mapping and no CalDAV task - skip
-							}
-						} else {
-							// DEBUG
-							console.log(
-								"Found existing mapping for blockId:",
-								task.blockId,
-								existingMapping
-							);
-
-							// Mapping exists - check if it needs metadata refresh
-							// This handles old mappings created before caldavHref/caldavEtag were added
-							// IMPORTANT: Only refresh href/etag, NOT lastKnownCalDAVModified (that would break change detection)
-							if (!existingMapping.caldavHref || !existingMapping.caldavEtag) {
-								console.log(
-									"Refreshing mapping metadata from CalDAV:",
-									task.blockId
-								);
-
-								// Find the corresponding CalDAV task by UID
-								const caldavTask = caldavTasks.find(
-									(ct) =>
-										ct.uid === existingMapping!.caldavUid
-								);
-
-								if (caldavTask) {
-									// Update mapping with missing metadata
-									// DO NOT update lastKnownCalDAVModified here - that would defeat change detection!
-									existingMapping.caldavHref = caldavTask.href;
-									existingMapping.caldavEtag = caldavTask.etag;
-
-									setMapping(existingMapping);
-									await this.saveData();
-
-									console.log(
-										"Updated mapping metadata from CalDAV:",
-										existingMapping
-									);
-								} else {
-									console.warn(
-										`CalDAV task not found for UID ${existingMapping.caldavUid}, skipping update`
-									);
-									continue;
-								}
-							}
-						}
-
-						// DEBUG
-						console.log(
-							"Existing mapping found for:",
-							task.blockId,
-							existingMapping
-						);
-
-						// Find the corresponding CalDAV task
-						const caldavTask = caldavTasks.find(
-							(ct) => ct.uid === existingMapping!.caldavUid
-						);
-
-						if (!caldavTask) {
-							console.warn(
-								`CalDAV task not found for UID ${existingMapping!.caldavUid}, skipping`
-							);
-							continue;
-						}
-
-						// T058: Bidirectional sync - detect changes from both sides
-						const obsidianChanged = this.detectObsidianChanges(task, existingMapping);
-						const caldavChanged = this.detectCalDAVChanges(caldavTask, existingMapping);
-
-						// Check if we have a conflict (both sides changed)
-						if (hasConflict(obsidianChanged, caldavChanged)) {
-							console.log(
-								`Conflict detected for task: ${task.description}`
-							);
-
-							// Resolve conflict using last-write-wins
-							const resolution = resolveConflict(task, caldavTask, existingMapping);
-
-							// Log the conflict resolution
-							const logMessage = formatConflictLog(resolution, task.description);
-							console.log(logMessage);
-
-							// Apply the winning side
-							if (resolution.winner === 'caldav') {
-								// CalDAV wins - update Obsidian
-								await this.updateObsidianTask(task, caldavTask, existingMapping);
-								successCount++;
-							} else {
-								// Obsidian wins - update CalDAV
-								await this.updateCalDAVTask(task, existingMapping);
-								successCount++;
-							}
-						} else if (obsidianChanged) {
-							// Only Obsidian changed - update CalDAV
-							console.log(
-								"Obsidian changes detected for task:",
-								task.description
-							);
-							await this.updateCalDAVTask(task, existingMapping);
-							successCount++;
-						} else if (caldavChanged) {
-							// Only CalDAV changed - update Obsidian
-							console.log(
-								"CalDAV changes detected for task:",
-								task.description
-							);
-							await this.updateObsidianTask(task, caldavTask, existingMapping);
-							successCount++;
-						} else {
-							// Check for data mismatch even if no changes detected
-							const needsReconciliation = this.needsReconciliation(task, caldavTask);
-
-							if (needsReconciliation) {
-								console.warn(
-									`CalDAV data mismatch detected for task: ${task.description}`
-								);
-								console.warn(
-									`  Obsidian: "${task.description}" (${task.status})`
-								);
-								console.warn(
-									`  CalDAV: "${caldavTask.summary}" (${caldavTask.status})`
-								);
-								console.warn(`  Forcing update to CalDAV...`);
-								await this.updateCalDAVTask(task, existingMapping);
-								successCount++;
-							}
-						}
-					}
-				} catch (error) {
-					// T044: Error handling for failed task uploads
-					errorCount++;
-					const errorMsg =
-						error instanceof Error ? error.message : String(error);
-					errors.push(
-						`${task.filePath}:${task.lineNumber} - ${errorMsg}`
-					);
-					console.error(
-						`Failed to sync task at ${task.filePath}:${task.lineNumber}:`,
-						error
-					);
-					// Continue with next task (skip and continue logic)
-				}
-			}
+			// Process each Obsidian task
+			await this.processObsidianTasks(obsidianTasks, caldavTasks, stats);
 
 			// Disconnect from CalDAV
 			await this.client.disconnect();
 
-			// T045: Sync progress feedback
-			if (errorCount === 0) {
-				showSyncSuccess(`Successfully synced ${successCount} tasks`);
-			} else {
-				showSyncError(
-					`Sync completed with errors: ${successCount} succeeded, ${errorCount} failed`,
-					errors
-				);
-			}
+			// Show sync results
+			this.showSyncResults(stats);
 		} catch (error) {
-			// T044: Error handling
+			this.handleSyncError(error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Connect to CalDAV server with error handling
+	 * Implements T072: Comprehensive error handling for network failures
+	 */
+	private async connectToServer(): Promise<void> {
+		try {
+			await this.client.connect();
+			Logger.debug("Connected to CalDAV server");
+		} catch (error) {
 			const errorMsg =
 				error instanceof Error ? error.message : String(error);
-			showSyncError(`Sync failed: ${errorMsg}`, []);
+
+			if (
+				errorMsg.includes("ERR_CONNECTION_REFUSED") ||
+				errorMsg.includes("ECONNREFUSED")
+			) {
+				throw new Error(
+					"Cannot connect to CalDAV server. Please check:\n" +
+						"1. The server URL is correct\n" +
+						"2. The CalDAV server is running\n" +
+						"3. You have network connectivity"
+				);
+			}
+
 			throw error;
+		}
+	}
+
+	/**
+	 * Fetch tasks from both Obsidian vault and CalDAV server
+	 */
+	private async fetchAllTasks(): Promise<{
+		caldavTasks: CalDAVTask[];
+		obsidianTasks: Task[];
+	}> {
+		// Calculate age threshold for completed tasks
+		const ageThreshold = this.calculateAgeThreshold();
+
+		// Fetch from CalDAV with server-side filtering
+		const caldavTasks = await this.client.fetchAllTasks(ageThreshold);
+		Logger.info(`Fetched ${caldavTasks.length} tasks from CalDAV server`);
+
+		if (ageThreshold) {
+			Logger.debug(
+				`Server-side filtering active: excluding tasks older than ${ageThreshold.toISOString()}`
+			);
+		}
+
+		// Scan vault for tasks
+		const allTasks = await scanVaultForTasks(this.vault);
+
+		// Get currently active file to exclude from sync
+		const activeFile = this.workspace.getActiveFile();
+		const activeFilePath = activeFile?.path;
+
+		// Apply filters and exclude active file
+		const obsidianTasks = allTasks.filter((task) => {
+			// Always exclude tasks from currently edited file
+			if (activeFilePath && task.filePath === activeFilePath) {
+				return false;
+			}
+			return this.filter.shouldSync(task);
+		});
+
+		// Show filter statistics
+		this.showFilterStats(allTasks.length, obsidianTasks.length, activeFilePath);
+
+		return { caldavTasks, obsidianTasks };
+	}
+
+	/**
+	 * Calculate age threshold for completed tasks
+	 */
+	private calculateAgeThreshold(): Date | undefined {
+		if (this.config.completedTaskAgeDays <= 0) {
+			return undefined;
+		}
+
+		const threshold = new Date();
+		threshold.setDate(
+			threshold.getDate() - this.config.completedTaskAgeDays
+		);
+		return threshold;
+	}
+
+	/**
+	 * Show filter statistics to user
+	 */
+	private showFilterStats(totalTasks: number, filteredTasks: number, activeFilePath?: string): void {
+		const excludedCount = totalTasks - filteredTasks;
+
+		if (excludedCount > 0) {
+			let message = `Found ${filteredTasks} tasks to sync (${excludedCount} excluded`;
+			if (activeFilePath) {
+				message += `, including active file`;
+			}
+			message += `)`;
+
+			new Notice(message, 5000);
+			Logger.info(`${excludedCount} tasks excluded (filters + active file)`);
+			if (activeFilePath) {
+				Logger.debug(`Active file excluded from sync: ${activeFilePath}`);
+			}
+		} else {
+			new Notice(`Found ${filteredTasks} tasks to sync`, 3000);
+		}
+	}
+
+	/**
+	 * Process all Obsidian tasks for sync
+	 */
+	private async processObsidianTasks(
+		obsidianTasks: Task[],
+		caldavTasks: CalDAVTask[],
+		stats: SyncStats
+	): Promise<void> {
+		for (const task of obsidianTasks) {
+			try {
+				await this.processTask(task, caldavTasks, stats);
+			} catch (error) {
+				this.handleTaskError(task, error, stats);
+			}
+		}
+	}
+
+	/**
+	 * Process a single task for sync
+	 */
+	private async processTask(
+		task: Task,
+		caldavTasks: CalDAVTask[],
+		stats: SyncStats
+	): Promise<void> {
+		// Handle untracked tasks (no block ID)
+		if (!task.blockId || task.blockId === "") {
+			await this.handleUntrackedTask(task);
+			stats.successCount++;
+			return;
+		}
+
+		// Get or create mapping for this task
+		const mapping = await this.getOrCreateMapping(task, caldavTasks);
+
+		if (!mapping) {
+			// No mapping and no matching CalDAV task - skip
+			return;
+		}
+
+		// Refresh mapping metadata if needed
+		await this.refreshMappingMetadata(mapping, caldavTasks);
+
+		// Find corresponding CalDAV task
+		const caldavTask = caldavTasks.find(
+			(ct) => ct.uid === mapping.caldavUid
+		);
+
+		if (!caldavTask) {
+			Logger.warn(
+				`CalDAV task not found for UID ${mapping.caldavUid}, skipping`
+			);
+			return;
+		}
+
+		// Perform bidirectional sync
+		await this.syncBidirectional(task, caldavTask, mapping);
+		stats.successCount++;
+	}
+
+	/**
+	 * Handle a task that doesn't have a block ID yet
+	 */
+	private async handleUntrackedTask(task: Task): Promise<void> {
+		Logger.debug(`Creating new task: ${task.description}`);
+		await this.addBlockIdToTask(task);
+		await this.createTaskOnCalDAV(task);
+	}
+
+	/**
+	 * Get existing mapping or create a new one by matching with CalDAV
+	 */
+	private async getOrCreateMapping(
+		task: Task,
+		caldavTasks: CalDAVTask[]
+	): Promise<SyncMapping | null> {
+		// Check for existing mapping
+		let mapping = getMappingByBlockId(task.blockId);
+
+		if (mapping) {
+			return mapping;
+		}
+
+		Logger.debug(
+			`No mapping found for task ${task.blockId}, attempting reconciliation`
+		);
+
+		// Try to find matching CalDAV task by description
+		const caldavTask = await this.findCalDAVTaskByDescription(
+			caldavTasks,
+			task.description
+		);
+
+		if (caldavTask) {
+			Logger.debug(
+				`Found matching CalDAV task, reconciling: ${caldavTask.uid}`
+			);
+			mapping = await this.reconcileTask(task, caldavTask);
+			return mapping;
+		}
+
+		// No mapping and no matching CalDAV task
+		return null;
+	}
+
+	/**
+	 * Refresh mapping metadata (href, etag) if missing
+	 */
+	private async refreshMappingMetadata(
+		mapping: SyncMapping,
+		caldavTasks: CalDAVTask[]
+	): Promise<void> {
+		// Check if metadata is missing
+		if (mapping.caldavHref && mapping.caldavEtag) {
+			return; // Already has metadata
+		}
+
+		Logger.debug(`Refreshing mapping metadata for task ${mapping.blockId}`);
+
+		// Find the corresponding CalDAV task
+		const caldavTask = caldavTasks.find(
+			(ct) => ct.uid === mapping.caldavUid
+		);
+
+		if (!caldavTask) {
+			Logger.warn(
+				`Cannot refresh metadata: CalDAV task not found for UID ${mapping.caldavUid}`
+			);
+			return;
+		}
+
+		// Update mapping with missing metadata
+		// IMPORTANT: Only refresh href/etag, NOT lastKnownCalDAVModified
+		mapping.caldavHref = caldavTask.href;
+		mapping.caldavEtag = caldavTask.etag;
+
+		setMapping(mapping);
+		await this.saveData();
+
+		Logger.debug(`Metadata refreshed for task ${mapping.blockId}`);
+	}
+
+	/**
+	 * Perform bidirectional sync between Obsidian and CalDAV
+	 */
+	private async syncBidirectional(
+		task: Task,
+		caldavTask: CalDAVTask,
+		mapping: SyncMapping
+	): Promise<void> {
+		// Detect changes from both sides
+		const obsidianChanged = this.detectObsidianChanges(task, mapping);
+		const caldavChanged = this.detectCalDAVChanges(caldavTask, mapping);
+
+		// Handle conflicts
+		if (hasConflict(obsidianChanged, caldavChanged)) {
+			await this.handleConflict(task, caldavTask, mapping);
+			return;
+		}
+
+		// Handle Obsidian changes
+		if (obsidianChanged) {
+			Logger.debug(`Obsidian changes detected for: ${task.description}`);
+			await this.updateCalDAVTask(task, mapping);
+			return;
+		}
+
+		// Handle CalDAV changes
+		if (caldavChanged) {
+			Logger.debug(`CalDAV changes detected for: ${task.description}`);
+			await this.updateObsidianTask(task, caldavTask, mapping);
+			return;
+		}
+
+		// Check for data mismatch (edge case)
+		if (this.needsReconciliation(task, caldavTask)) {
+			Logger.warn(`Data mismatch detected for: ${task.description}`);
+			Logger.warn(`  Obsidian: "${task.description}" (${task.status})`);
+			Logger.warn(
+				`  CalDAV: "${caldavTask.summary}" (${caldavTask.status})`
+			);
+			Logger.warn(`  Forcing update to CalDAV...`);
+			await this.updateCalDAVTask(task, mapping);
+		}
+	}
+
+	/**
+	 * Handle conflicts when both sides have changed
+	 */
+	private async handleConflict(
+		task: Task,
+		caldavTask: CalDAVTask,
+		mapping: SyncMapping
+	): Promise<void> {
+		Logger.info(`Conflict detected for task: ${task.description}`);
+
+		// Resolve conflict using last-write-wins
+		const resolution = resolveConflict(task, caldavTask, mapping);
+
+		// Log the conflict resolution
+		const logMessage = formatConflictLog(resolution, task.description);
+		Logger.info(logMessage);
+
+		// Apply the winning side
+		if (resolution.winner === "caldav") {
+			await this.updateObsidianTask(task, caldavTask, mapping);
+		} else {
+			await this.updateCalDAVTask(task, mapping);
+		}
+	}
+
+	/**
+	 * Handle task processing error
+	 * Implements T044: Error handling for failed task uploads
+	 */
+	private handleTaskError(
+		task: Task,
+		error: unknown,
+		stats: SyncStats
+	): void {
+		stats.errorCount++;
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		const errorLocation = `${task.filePath}:${task.lineNumber}`;
+		stats.errors.push(`${errorLocation} - ${errorMsg}`);
+
+		Logger.error(`Failed to sync task at ${errorLocation}`, error);
+	}
+
+	/**
+	 * Handle sync-level error
+	 * Implements T044: Error handling
+	 */
+	private handleSyncError(error: unknown): void {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		Logger.error(`Sync failed: ${errorMsg}`, error);
+		showSyncError(`Sync failed: ${errorMsg}`, []);
+	}
+
+	/**
+	 * Show sync results to user
+	 * Implements T045: Sync progress feedback
+	 */
+	private showSyncResults(stats: SyncStats): void {
+		if (stats.errorCount === 0) {
+			Logger.info(`Successfully synced ${stats.successCount} tasks`);
+			showSyncSuccess(`Successfully synced ${stats.successCount} tasks`);
+		} else {
+			Logger.warn(
+				`Sync completed with errors: ${stats.successCount} succeeded, ${stats.errorCount} failed`
+			);
+			showSyncError(
+				`Sync completed with errors: ${stats.successCount} succeeded, ${stats.errorCount} failed`,
+				stats.errors
+			);
 		}
 	}
 
@@ -387,8 +506,7 @@ export class SyncEngine {
 			vtodoData.status
 		);
 
-		// DEBUG
-		console.log("Created CalDAV task:", caldavTask);
+		Logger.debug(`Created CalDAV task: ${caldavTask.uid}`);
 
 		// T043: Store sync mapping after successful creation
 		const mapping: SyncMapping = {
@@ -414,10 +532,7 @@ export class SyncEngine {
 	 * @param caldavTask The CalDAV task
 	 * @returns true if reconciliation is needed (data doesn't match)
 	 */
-	private needsReconciliation(
-		task: Task,
-		caldavTask: CalDAVTask
-	): boolean {
+	private needsReconciliation(task: Task, caldavTask: CalDAVTask): boolean {
 		// Convert task to expected VTODO format
 		const expected = taskToVTODO(task);
 
@@ -444,10 +559,9 @@ export class SyncEngine {
 		const caldavDate = caldavTask.due
 			? `${caldavTask.due.getUTCFullYear()}-${String(
 					caldavTask.due.getUTCMonth() + 1
-			  ).padStart(2, "0")}-${String(caldavTask.due.getUTCDate()).padStart(
-					2,
-					"0"
-			  )}`
+			  ).padStart(2, "0")}-${String(
+					caldavTask.due.getUTCDate()
+			  ).padStart(2, "0")}`
 			: null;
 
 		if (expectedDate !== caldavDate) {
@@ -467,27 +581,15 @@ export class SyncEngine {
 	private detectObsidianChanges(task: Task, mapping: SyncMapping): boolean {
 		// Calculate current content hash
 		const currentHash = hashTaskContent(task);
+		const hasChanged = currentHash !== mapping.lastKnownContentHash;
 
-		//DEBUG
-		console.log("=== Change Detection Debug ===");
-		console.log("Task blockId:", task.blockId);
-		console.log("Task description:", JSON.stringify(task.description));
-		console.log("Task status:", task.status);
-		console.log("Task dueDate:", task.dueDate?.toISOString());
-		console.log("Current hash:", currentHash);
-		console.log("Stored hash:", mapping.lastKnownContentHash);
-		console.log("Hashes match:", currentHash === mapping.lastKnownContentHash);
+		if (hasChanged) {
+			Logger.debug(`Obsidian task changed: ${task.blockId}`);
+			Logger.debug(`  Current hash: ${currentHash}`);
+			Logger.debug(`  Stored hash: ${mapping.lastKnownContentHash}`);
+		}
 
-		// Calculate what the hash string looks like
-		const dateString = task.dueDate
-			? `${task.dueDate.getUTCFullYear()}-${String(task.dueDate.getUTCMonth() + 1).padStart(2, '0')}-${String(task.dueDate.getUTCDate()).padStart(2, '0')}`
-			: 'null';
-		const hashInput = `${task.description}|${dateString}|${task.status}`;
-		console.log("Hash input string:", JSON.stringify(hashInput));
-		console.log("================================");
-
-		// Compare with last known hash
-		return currentHash !== mapping.lastKnownContentHash;
+		return hasChanged;
 	}
 
 	/**
@@ -497,27 +599,32 @@ export class SyncEngine {
 	 * @param mapping The existing sync mapping
 	 * @returns true if task has changed on CalDAV
 	 */
-	private detectCalDAVChanges(caldavTask: CalDAVTask, mapping: SyncMapping): boolean {
+	private detectCalDAVChanges(
+		caldavTask: CalDAVTask,
+		mapping: SyncMapping
+	): boolean {
 		// Compare lastModified timestamps
 		// If CalDAV's lastModified is newer than what we have stored, it changed
 		// NOTE: Normalize to seconds precision because CalDAV servers strip milliseconds
-		const caldavModified = Math.floor(caldavTask.lastModified.getTime() / 1000);
-		const lastKnown = Math.floor(mapping.lastKnownCalDAVModified.getTime() / 1000);
+		const caldavModified = Math.floor(
+			caldavTask.lastModified.getTime() / 1000
+		);
+		const lastKnown = Math.floor(
+			mapping.lastKnownCalDAVModified.getTime() / 1000
+		);
+		const hasChanged = caldavModified > lastKnown;
 
-		// DEBUG
-		console.log("=== CalDAV Change Detection Debug ===");
-		console.log("CalDAV UID:", caldavTask.uid);
-		console.log("CalDAV summary:", JSON.stringify(caldavTask.summary));
-		console.log("CalDAV status:", caldavTask.status);
-		console.log("CalDAV dueDate:", caldavTask.due?.toISOString());
-		console.log("CalDAV lastModified:", caldavTask.lastModified.toISOString());
-		console.log("Stored lastKnownCalDAVModified:", mapping.lastKnownCalDAVModified.toISOString());
-		console.log("CalDAV modified (seconds):", caldavModified);
-		console.log("Last known (seconds):", lastKnown);
-		console.log("Has changed:", caldavModified > lastKnown);
-		console.log("====================================");
+		if (hasChanged) {
+			Logger.debug(`CalDAV task changed: ${caldavTask.uid}`);
+			Logger.debug(
+				`  CalDAV modified: ${caldavTask.lastModified.toISOString()}`
+			);
+			Logger.debug(
+				`  Last known: ${mapping.lastKnownCalDAVModified.toISOString()}`
+			);
+		}
 
-		return caldavModified > lastKnown;
+		return hasChanged;
 	}
 
 	/**
@@ -636,6 +743,10 @@ export class SyncEngine {
 		task: Task,
 		caldavTask: CalDAVTask
 	): Promise<SyncMapping> {
+		Logger.info(
+			`Reconciling task: ${task.description} with CalDAV UID: ${caldavTask.uid}`
+		);
+
 		// Create mapping to link Obsidian task with existing CalDAV task
 		const mapping: SyncMapping = {
 			blockId: task.blockId,
@@ -652,10 +763,6 @@ export class SyncEngine {
 
 		// Persist mappings to plugin data
 		await this.saveData();
-
-		console.log(
-			`Reconciled task: ${task.description} with CalDAV UID: ${caldavTask.uid}`
-		);
 
 		return mapping;
 	}

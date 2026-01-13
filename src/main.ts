@@ -27,6 +27,7 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 		// Initialize sync engine (Phase 5 - US1: T041)
 		this.syncEngine = new SyncEngine(
 			this.app.vault,
+			this.app.workspace,
 			this.settings,
 			async () => await this.savePluginData()
 		);
