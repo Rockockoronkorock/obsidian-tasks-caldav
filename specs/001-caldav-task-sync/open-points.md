@@ -1,0 +1,4 @@
+-   [ ] Second sync Obsidian CalDav does not work, some data gets lost. Needs to update Caldav task first.
+-   [ ] Then test again, still something open?
+-   [ ] Modal Notifications weg!
+-   [ ] und?
