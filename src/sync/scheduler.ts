@@ -11,8 +11,9 @@ import { Logger } from './logger';
 
 /**
  * Callback type for sync operations
+ * @param isAutoSync Whether this is an automatic sync (T015, 002-sync-polish)
  */
-export type SyncCallback = () => Promise<number>;
+export type SyncCallback = (isAutoSync: boolean) => Promise<number>;
 
 /**
  * Manages automatic sync scheduling and manual triggers
@@ -92,7 +93,7 @@ export class SyncScheduler {
 	/**
 	 * Perform sync operation with notifications
 	 * Implements T075: Automatic retry on next interval
-	 * @param isAutoSync Whether this is an automatic sync
+	 * @param isAutoSync Whether this is an automatic sync (T015, 002-sync-polish)
 	 */
 	private async performSync(isAutoSync: boolean): Promise<void> {
 		try {
@@ -100,8 +101,8 @@ export class SyncScheduler {
 				showSyncStart();
 			}
 
-			// Attempt sync
-			const taskCount = await this.syncCallback();
+			// Attempt sync (T015: Pass isAutoSync to sync callback)
+			const taskCount = await this.syncCallback(isAutoSync);
 
 			// Success! Reset failure counter
 			if (this.consecutiveFailures > 0) {

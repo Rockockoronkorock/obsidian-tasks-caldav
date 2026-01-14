@@ -5,6 +5,7 @@ import { CalDAVSettingsTab } from "./ui/settingsTab";
 import { SyncScheduler } from "./sync/scheduler";
 import { SyncEngine } from "./sync/engine";
 import { loadMappings, saveMappings } from "./sync/mapping";
+import { setDebugMode } from "./sync/logger";
 
 /**
  * Main plugin class for CalDAV Task Synchronization
@@ -24,6 +25,9 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 		// Load saved settings
 		await this.loadSettings();
 
+		// Initialize debug logging mode based on settings
+		setDebugMode(this.settings.enableDebugLogging);
+
 		// Initialize sync engine (Phase 5 - US1: T041)
 		this.syncEngine = new SyncEngine(
 			this.app.vault,
@@ -35,10 +39,11 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 		this.addSettingTab(new CalDAVSettingsTab(this.app, this));
 
 		// Initialize sync scheduler (Phase 4 - US5: T027-T028)
+		// T015: Pass isAutoSync parameter to performSync
 		this.syncScheduler = new SyncScheduler(
 			this.app,
 			this.settings,
-			async () => await this.performSync()
+			async (isAutoSync: boolean) => await this.performSync(isAutoSync)
 		);
 
 		// Start automatic sync if enabled
@@ -78,17 +83,18 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 
 	/**
 	 * Perform sync operation (Phase 5 - US1: T041)
+	 * @param isAutoSync Whether this is an automatic sync (T015, 002-sync-polish)
 	 * @returns Number of tasks synced
 	 */
-	private async performSync(): Promise<number> {
+	private async performSync(isAutoSync: boolean = false): Promise<number> {
 		if (!this.syncEngine) {
 			console.error("Sync engine not initialized");
 			return 0;
 		}
 
 		try {
-			// Perform sync from Obsidian to CalDAV
-			await this.syncEngine.syncObsidianToCalDAV();
+			// Perform sync from Obsidian to CalDAV (T015: Pass isAutoSync)
+			await this.syncEngine.syncObsidianToCalDAV(isAutoSync);
 			return 0; // TODO: Return actual count in future
 		} catch (error) {
 			console.error("Sync failed:", error);

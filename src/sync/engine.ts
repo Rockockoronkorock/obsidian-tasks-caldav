@@ -70,10 +70,14 @@ export class SyncEngine {
 	 * Perform bidirectional sync between Obsidian and CalDAV
 	 * This implements T040: Initial sync logic and T058: Bidirectional sync integration
 	 * Refactored for better readability and maintainability
+	 * @param isAutoSync Whether this is an automatic sync (T009, 002-sync-polish)
 	 */
-	async syncObsidianToCalDAV(): Promise<void> {
-		showSyncStart();
-		Logger.info("Starting bidirectional sync...");
+	async syncObsidianToCalDAV(isAutoSync: boolean = false): Promise<void> {
+		if (!isAutoSync) {
+			showSyncStart();
+		}
+		// T019: Log sync start at INFO level (always shown)
+		Logger.syncStart();
 
 		const stats: SyncStats = {
 			successCount: 0,
@@ -86,7 +90,7 @@ export class SyncEngine {
 			await this.connectToServer();
 
 			// Fetch tasks from both sources
-			const { caldavTasks, obsidianTasks } = await this.fetchAllTasks();
+			const { caldavTasks, obsidianTasks } = await this.fetchAllTasks(isAutoSync);
 
 			// Process each Obsidian task
 			await this.processObsidianTasks(obsidianTasks, caldavTasks, stats);
@@ -95,7 +99,10 @@ export class SyncEngine {
 			await this.client.disconnect();
 
 			// Show sync results
-			this.showSyncResults(stats);
+			this.showSyncResults(stats, isAutoSync);
+
+			// T020: Log sync completion at INFO level (always shown)
+			Logger.syncComplete();
 		} catch (error) {
 			this.handleSyncError(error);
 			throw error;
@@ -132,8 +139,9 @@ export class SyncEngine {
 
 	/**
 	 * Fetch tasks from both Obsidian vault and CalDAV server
+	 * @param isAutoSync Whether this is an automatic sync (T016, 002-sync-polish)
 	 */
-	private async fetchAllTasks(): Promise<{
+	private async fetchAllTasks(isAutoSync: boolean = false): Promise<{
 		caldavTasks: CalDAVTask[];
 		obsidianTasks: Task[];
 	}> {
@@ -158,8 +166,10 @@ export class SyncEngine {
 			this.filter.shouldSync(task)
 		);
 
-		// Show filter statistics
-		this.showFilterStats(allTasks.length, obsidianTasks.length);
+		// Show filter statistics only for manual sync (T016)
+		if (!isAutoSync) {
+			this.showFilterStats(allTasks.length, obsidianTasks.length);
+		}
 
 		return { caldavTasks, obsidianTasks };
 	}
@@ -452,15 +462,20 @@ export class SyncEngine {
 	/**
 	 * Show sync results to user
 	 * Implements T045: Sync progress feedback
+	 * @param isAutoSync Whether this is an automatic sync (T012, 002-sync-polish)
 	 */
-	private showSyncResults(stats: SyncStats): void {
+	private showSyncResults(stats: SyncStats, isAutoSync: boolean = false): void {
 		if (stats.errorCount === 0) {
 			Logger.info(`Successfully synced ${stats.successCount} tasks`);
-			showSyncSuccess(`Successfully synced ${stats.successCount} tasks`);
+			// Only show success notification for manual sync (T012)
+			if (!isAutoSync) {
+				showSyncSuccess(`Successfully synced ${stats.successCount} tasks`);
+			}
 		} else {
 			Logger.warn(
 				`Sync completed with errors: ${stats.successCount} succeeded, ${stats.errorCount} failed`
 			);
+			// Always show errors (both auto and manual sync)
 			showSyncError(
 				`Sync completed with errors: ${stats.successCount} succeeded, ${stats.errorCount} failed`,
 				stats.errors
@@ -628,6 +643,7 @@ export class SyncEngine {
 	/**
 	 * Update a task on CalDAV server
 	 * Implements T048: Update sync logic
+	 * Updated for T029-T030 (002-sync-polish): Use property preservation
 	 * @param task The updated task from vault
 	 * @param mapping The existing sync mapping
 	 */
@@ -651,8 +667,8 @@ export class SyncEngine {
 		const caldavEtag = mapping.caldavEtag;
 		const caldavHref = mapping.caldavHref;
 
-		// T047: Update task on CalDAV server with ETag handling
-		const updatedTask = await this.client.updateTask(
+		// T029-T030: Update task using property preservation pattern
+		const updatedTask = await this.client.updateTaskWithPreservation(
 			caldavUid,
 			vtodoData.summary,
 			vtodoData.due,

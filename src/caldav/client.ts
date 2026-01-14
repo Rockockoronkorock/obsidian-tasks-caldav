@@ -18,6 +18,7 @@ import {
 } from "./errors";
 import { withRetry } from "./retry";
 import { Logger } from "../sync/logger";
+import { updateVTODOProperties, escapeICalText } from "./vtodo";
 
 /**
  * Minimal tsdav client interface for our needs
@@ -385,13 +386,16 @@ export class CalDAVClient {
 		const timestamp =
 			new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 
+		// T035: Escape summary text per iCalendar spec
+		const escapedSummary = escapeICalText(summary);
+
 		let vtodoString = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Obsidian Tasks CalDAV Plugin//EN
 BEGIN:VTODO
 UID:${uid}
 DTSTAMP:${timestamp}
-SUMMARY:${summary}
+SUMMARY:${escapedSummary}
 STATUS:${status}
 LAST-MODIFIED:${timestamp}`;
 
@@ -568,6 +572,121 @@ END:VCALENDAR`;
 	}
 
 	/**
+	 * Update a task while preserving extended CalDAV properties
+	 * T028 (002-sync-polish): Read-before-update pattern for property preservation
+	 * @param caldavUid The CalDAV UID
+	 * @param summary New task description
+	 * @param due New due date (or null)
+	 * @param status New status
+	 * @param etag Current ETag for optimistic locking
+	 * @param href Resource URL
+	 * @returns Updated CalDAV task
+	 */
+	async updateTaskWithPreservation(
+		caldavUid: string,
+		summary: string,
+		due: Date | null,
+		status: VTODOStatus,
+		etag: string,
+		href: string
+	): Promise<CalDAVTask> {
+		if (!this.client || !this.calendar) {
+			throw new CalDAVError(
+				"Client not connected. Call connect() first."
+			);
+		}
+
+		try {
+			// T027: Fetch the existing raw VTODO data
+			const existingVTODO = await this.fetchTaskRawData(caldavUid);
+
+			if (!existingVTODO) {
+				throw new CalDAVError(
+					`Task with UID ${caldavUid} not found on server. It may have been deleted.`
+				);
+			}
+
+			Logger.debug(`Updating task ${caldavUid} with property preservation`);
+
+			// T026: Update only managed properties, preserving everything else
+			const updatedVTODO = updateVTODOProperties(
+				existingVTODO,
+				summary,
+				due,
+				status
+			);
+
+			// Send the modified VTODO back to the server
+			const result = await this.client.updateCalendarObject({
+				calendarObject: {
+					url: href,
+					data: updatedVTODO,
+					etag,
+				},
+			});
+
+			let newEtag = result.etag;
+
+			// If the server didn't return a new etag, fetch it
+			if (!newEtag) {
+				Logger.debug(
+					"Server did not return etag in update response, fetching fresh etag..."
+				);
+				const freshTask = await this.fetchTaskByUid(caldavUid);
+				if (freshTask) {
+					newEtag = freshTask.etag;
+					Logger.debug(`Fetched fresh etag: ${newEtag}`);
+				} else {
+					Logger.warn(
+						`Could not fetch fresh etag for task ${caldavUid}, using old etag`
+					);
+					newEtag = etag;
+				}
+			}
+
+			Logger.debug(`Task ${caldavUid} updated successfully with preserved properties`);
+
+			return {
+				uid: caldavUid,
+				summary,
+				due,
+				status,
+				lastModified: new Date(),
+				etag: newEtag,
+				href,
+			};
+		} catch (error) {
+			if (error instanceof Error) {
+				// Handle 412 Precondition Failed (ETag conflict)
+				if (
+					error.message.includes("412") ||
+					error.message.includes("Precondition Failed")
+				) {
+					throw new CalDAVConflictError(
+						`Task was modified on server. Please sync again to get latest version.`,
+						etag
+					);
+				}
+
+				// Handle connection errors
+				if (
+					error.message.includes("ERR_CONNECTION_REFUSED") ||
+					error.message.includes("ECONNREFUSED")
+				) {
+					throw new CalDAVNetworkError(
+						`Cannot reach CalDAV server to update task. Server may be offline.`
+					);
+				}
+
+				throw new CalDAVError(
+					`Failed to update task with preservation: ${error.message}`
+				);
+			}
+			throw error;
+		}
+	}
+
+	/**
 	 * Delete a task from CalDAV server
 	 * @param caldavUid The CalDAV UID
 	 * @param etag Current ETag
@@ -644,6 +763,57 @@ END:VCALENDAR`;
 		} catch (error) {
 			Logger.warn(
 				`Failed to fetch task by UID ${uid}: ${
+					error instanceof Error ? error.message : String(error)
+				}`
+			);
+			return null;
+		}
+	}
+
+	/**
+	 * Fetch the raw iCalendar VTODO data for a task
+	 * T027 (002-sync-polish): Used for property preservation
+	 * @param uid The CalDAV UID of the task
+	 * @returns The raw VTODO iCalendar string, or null if not found
+	 */
+	async fetchTaskRawData(uid: string): Promise<string | null> {
+		if (!this.client || !this.calendar) {
+			throw new CalDAVError(
+				"Client not connected. Call connect() first."
+			);
+		}
+
+		try {
+			// Fetch all tasks and find the one with matching UID
+			const calendarObjects = await this.client.fetchCalendarObjects({
+				calendar: this.calendar,
+				filters: {
+					"comp-filter": {
+						_attributes: { name: "VCALENDAR" },
+						"comp-filter": {
+							_attributes: { name: "VTODO" },
+						},
+					},
+				},
+			});
+
+			if (!calendarObjects) {
+				return null;
+			}
+
+			// Find the task with matching UID and return raw data
+			for (const obj of calendarObjects) {
+				if (obj.data && obj.data.includes(`UID:${uid}`)) {
+					Logger.debug(`Fetched raw VTODO data for UID ${uid}`);
+					return obj.data;
+				}
+			}
+
+			Logger.debug(`Task with UID ${uid} not found on server`);
+			return null;
+		} catch (error) {
+			Logger.warn(
+				`Failed to fetch raw VTODO data for UID ${uid}: ${
 					error instanceof Error ? error.message : String(error)
 				}`
 			);

@@ -72,4 +72,18 @@ export class Logger {
 			`Sync stats: ${stats.synced}/${stats.total} tasks synced, ${stats.filtered} filtered, ${stats.errors} errors`
 		);
 	}
+
+	/**
+	 * Log sync start (INFO level - always shown)
+	 */
+	static syncStart(): void {
+		Logger.info("Sync started...");
+	}
+
+	/**
+	 * Log sync completion (INFO level - always shown)
+	 */
+	static syncComplete(): void {
+		Logger.info("Sync completed.");
+	}
 }

@@ -18,5 +18,8 @@ export const DEFAULT_SETTINGS: CalDAVConfiguration = {
 	// Filter settings
 	excludedFolders: [],
 	excludedTags: [],
-	completedTaskAgeDays: 30
+	completedTaskAgeDays: 30,
+
+	// Logging settings
+	enableDebugLogging: false
 };

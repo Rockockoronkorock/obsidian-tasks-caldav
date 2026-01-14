@@ -1,0 +1,3 @@
+-   [ ] Send modal notifications only if there is an error.
+-   [ ] Log only when a sync has started and is finished. Other (Debug) logs should only be shown if a debug setting is activated on the settings tab.
+-   [ ] If changes have been made to the Task on the CalDev server, e.g. a Category has been assigned which is not relevant for Obsidian, this should be kept in the future, meaning if afterwards a local change is done in Obsidian, this should not affect the additional information.

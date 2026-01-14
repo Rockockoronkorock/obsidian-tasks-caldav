@@ -87,6 +87,8 @@ export interface CalDAVConfiguration {
 	excludedTags: string[];
 	/** Age threshold in days for completed tasks (default: 30) */
 	completedTaskAgeDays: number;
+	/** Enable debug logging in browser console (default: false) */
+	enableDebugLogging: boolean;
 }
 
 /**

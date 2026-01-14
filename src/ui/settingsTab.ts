@@ -7,6 +7,7 @@ import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import CalDAVTaskSyncPlugin from '../main';
 import { CalDAVClient } from '../caldav/client';
 import { CalDAVAuthError, CalDAVNetworkError } from '../caldav/errors';
+import { setDebugMode } from '../sync/logger';
 
 export class CalDAVSettingsTab extends PluginSettingTab {
 	plugin: CalDAVTaskSyncPlugin;
@@ -110,6 +111,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 	/**
 	 * Add sync settings section (US5: T024-T032)
+	 * Extended for US2: T017-T018 (002-sync-polish)
 	 */
 	private addSyncSection(containerEl: HTMLElement): void {
 		containerEl.createEl('h3', { text: 'Sync Settings' });
@@ -155,6 +157,18 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 					} else {
 						new Notice('Sync interval must be at least 10 seconds');
 					}
+				}));
+
+		// Debug Logging Toggle (T017-T018, 002-sync-polish)
+		new Setting(containerEl)
+			.setName('Enable debug logging')
+			.setDesc('Show detailed sync logs in browser console (open with F12). Disable for minimal output.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableDebugLogging)
+				.onChange(async (value) => {
+					this.plugin.settings.enableDebugLogging = value;
+					setDebugMode(value);
+					await this.plugin.saveSettings();
 				}));
 	}
 

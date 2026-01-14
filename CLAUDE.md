@@ -22,6 +22,8 @@ npm test && npm run lint
 TypeScript 5.8.3 with strict mode, targeting Obsidian API (latest): Follow standard conventions
 
 ## Recent Changes
+- 002-sync-polish: Added TypeScript 5.8.3 with strict mode, targeting Obsidian API (latest)
+- 002-sync-polish: Added TypeScript 5.8.3 with strict mode, targeting Obsidian API (latest)
 
 - 001-caldav-task-sync: Added TypeScript 5.8.3 with strict mode, targeting Obsidian API (latest)
 
