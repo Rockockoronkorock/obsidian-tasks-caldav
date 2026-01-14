@@ -4,7 +4,7 @@
  * Refactored for Phase 9: Polish & Cross-Cutting Concerns
  */
 
-import { Vault, Notice, Workspace } from "obsidian";
+import { Vault, Notice } from "obsidian";
 import { Task, CalDAVConfiguration, SyncMapping, CalDAVTask } from "../types";
 import { CalDAVClient } from "../caldav/client";
 import { SyncFilter } from "./filters";
@@ -41,7 +41,6 @@ interface SyncStats {
  */
 export class SyncEngine {
 	private vault: Vault;
-	private workspace: Workspace;
 	private config: CalDAVConfiguration;
 	private client: CalDAVClient;
 	private filter: SyncFilter;
@@ -49,12 +48,10 @@ export class SyncEngine {
 
 	constructor(
 		vault: Vault,
-		workspace: Workspace,
 		config: CalDAVConfiguration,
 		saveData: () => Promise<void>
 	) {
 		this.vault = vault;
-		this.workspace = workspace;
 		this.config = config;
 		this.client = new CalDAVClient(config);
 		this.filter = new SyncFilter(config);
@@ -156,21 +153,13 @@ export class SyncEngine {
 		// Scan vault for tasks
 		const allTasks = await scanVaultForTasks(this.vault);
 
-		// Get currently active file to exclude from sync
-		const activeFile = this.workspace.getActiveFile();
-		const activeFilePath = activeFile?.path;
-
-		// Apply filters and exclude active file
-		const obsidianTasks = allTasks.filter((task) => {
-			// Always exclude tasks from currently edited file
-			if (activeFilePath && task.filePath === activeFilePath) {
-				return false;
-			}
-			return this.filter.shouldSync(task);
-		});
+		// Apply filters
+		const obsidianTasks = allTasks.filter((task) =>
+			this.filter.shouldSync(task)
+		);
 
 		// Show filter statistics
-		this.showFilterStats(allTasks.length, obsidianTasks.length, activeFilePath);
+		this.showFilterStats(allTasks.length, obsidianTasks.length);
 
 		return { caldavTasks, obsidianTasks };
 	}
@@ -193,21 +182,15 @@ export class SyncEngine {
 	/**
 	 * Show filter statistics to user
 	 */
-	private showFilterStats(totalTasks: number, filteredTasks: number, activeFilePath?: string): void {
+	private showFilterStats(totalTasks: number, filteredTasks: number): void {
 		const excludedCount = totalTasks - filteredTasks;
 
 		if (excludedCount > 0) {
-			let message = `Found ${filteredTasks} tasks to sync (${excludedCount} excluded`;
-			if (activeFilePath) {
-				message += `, including active file`;
-			}
-			message += `)`;
-
-			new Notice(message, 5000);
-			Logger.info(`${excludedCount} tasks excluded (filters + active file)`);
-			if (activeFilePath) {
-				Logger.debug(`Active file excluded from sync: ${activeFilePath}`);
-			}
+			new Notice(
+				`Found ${filteredTasks} tasks to sync (${excludedCount} excluded by filters)`,
+				5000
+			);
+			Logger.info(`${excludedCount} tasks excluded by filters`);
 		} else {
 			new Notice(`Found ${filteredTasks} tasks to sync`, 3000);
 		}
@@ -262,9 +245,8 @@ export class SyncEngine {
 		);
 
 		if (!caldavTask) {
-			Logger.warn(
-				`CalDAV task not found for UID ${mapping.caldavUid}, skipping`
-			);
+			Logger.warn(`CalDAV task not found for UID ${mapping.caldavUid}`);
+			// Skip
 			return;
 		}
 
@@ -388,14 +370,30 @@ export class SyncEngine {
 		}
 
 		// Check for data mismatch (edge case)
+		// This handles cases where timestamp-based change detection fails
+		// (e.g., clock skew, server not updating LAST-MODIFIED properly)
 		if (this.needsReconciliation(task, caldavTask)) {
 			Logger.warn(`Data mismatch detected for: ${task.description}`);
 			Logger.warn(`  Obsidian: "${task.description}" (${task.status})`);
 			Logger.warn(
 				`  CalDAV: "${caldavTask.summary}" (${caldavTask.status})`
 			);
-			Logger.warn(`  Forcing update to CalDAV...`);
-			await this.updateCalDAVTask(task, mapping);
+
+			// Determine direction: if Obsidian hash unchanged, CalDAV must have changed
+			const currentHash = hashTaskContent(task);
+			const obsidianUnchanged =
+				currentHash === mapping.lastKnownContentHash;
+
+			if (obsidianUnchanged) {
+				// Obsidian data unchanged since last sync, so CalDAV must have changed
+				// Pull changes from CalDAV to Obsidian
+				Logger.warn(`  Obsidian unchanged, pulling from CalDAV...`);
+				await this.updateObsidianTask(task, caldavTask, mapping);
+			} else {
+				// Obsidian changed, push to CalDAV
+				Logger.warn(`  Obsidian changed, pushing to CalDAV...`);
+				await this.updateCalDAVTask(task, mapping);
+			}
 		}
 	}
 

@@ -81,7 +81,9 @@ export class CalDAVClient {
 				// Find the calendar by path
 				const calendars = await this.client.fetchCalendars();
 
-				Logger.debug(`Found ${calendars?.length ?? 0} calendars on server`);
+				Logger.debug(
+					`Found ${calendars?.length ?? 0} calendars on server`
+				);
 
 				// Try to match by calendar path or use first available calendar
 				if (this.config.calendarPath && calendars) {
@@ -97,14 +99,20 @@ export class CalDAVClient {
 					);
 				} else if (calendars) {
 					this.calendar = calendars[0] ?? null;
-					Logger.debug(`Selected first available calendar: ${this.calendar?.url}`);
+					Logger.debug(
+						`Selected first available calendar: ${this.calendar?.url}`
+					);
 				}
 
 				if (!this.calendar) {
 					throw new CalDAVError("No calendar found on server");
 				}
 
-				Logger.info(`Connected to CalDAV calendar: ${this.calendar.displayName ?? this.calendar.url}`);
+				Logger.info(
+					`Connected to CalDAV calendar: ${
+						this.calendar.displayName ?? this.calendar.url
+					}`
+				);
 			} catch (error) {
 				// Transform error into appropriate CalDAV error type
 				throw this.handleConnectionError(error);
@@ -132,10 +140,13 @@ export class CalDAVClient {
 			}
 
 			// Check for network errors - connection refused
-			if (message.includes("ERR_CONNECTION_REFUSED") || message.includes("ECONNREFUSED")) {
+			if (
+				message.includes("ERR_CONNECTION_REFUSED") ||
+				message.includes("ECONNREFUSED")
+			) {
 				return new CalDAVNetworkError(
 					`Cannot connect to server at ${this.config.serverUrl}. ` +
-					"Please ensure the CalDAV server is running and accessible."
+						"Please ensure the CalDAV server is running and accessible."
 				);
 			}
 
@@ -156,7 +167,10 @@ export class CalDAVClient {
 			// Check for server errors
 			if (message.includes("500") || message.includes("503")) {
 				const statusMatch = message.match(/(\d{3})/);
-				const statusCode = statusMatch && statusMatch[1] ? parseInt(statusMatch[1]) : 500;
+				const statusCode =
+					statusMatch && statusMatch[1]
+						? parseInt(statusMatch[1])
+						: 500;
 				return new CalDAVServerError(
 					`Server error: ${message}`,
 					statusCode
@@ -199,7 +213,9 @@ export class CalDAVClient {
 	 * @param completedTaskAgeThreshold Optional date threshold to exclude old completed tasks at server level
 	 * @returns Array of CalDAV tasks
 	 */
-	async fetchAllTasks(completedTaskAgeThreshold?: Date): Promise<CalDAVTask[]> {
+	async fetchAllTasks(
+		completedTaskAgeThreshold?: Date
+	): Promise<CalDAVTask[]> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
 				"Client not connected. Call connect() first."
@@ -212,49 +228,67 @@ export class CalDAVClient {
 
 				// Create filter for VTODO items (tasks) instead of default VEVENT (events)
 				let vtodoFilter: any = {
-					'comp-filter': {
-						_attributes: { name: 'VCALENDAR' },
-						'comp-filter': {
-							_attributes: { name: 'VTODO' },
+					"comp-filter": {
+						_attributes: { name: "VCALENDAR" },
+						"comp-filter": {
+							_attributes: { name: "VTODO" },
 						},
 					},
 				};
 
 				// If age threshold is provided, add time-range filter to exclude old completed tasks
-				if (completedTaskAgeThreshold && completedTaskAgeThreshold.getTime() !== 0) {
-					const thresholdStr = this.formatDateTimeForCalDAV(completedTaskAgeThreshold);
+				if (
+					completedTaskAgeThreshold &&
+					completedTaskAgeThreshold.getTime() !== 0
+				) {
+					const thresholdStr = this.formatDateTimeForCalDAV(
+						completedTaskAgeThreshold
+					);
 
-					vtodoFilter['comp-filter']['comp-filter']['prop-filter'] = {
-						_attributes: { name: 'LAST-MODIFIED' },
-						'time-range': {
+					vtodoFilter["comp-filter"]["comp-filter"]["prop-filter"] = {
+						_attributes: { name: "LAST-MODIFIED" },
+						"time-range": {
 							_attributes: {
 								start: thresholdStr,
 							},
 						},
 					};
 
-					Logger.debug(`Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`);
+					Logger.debug(
+						`Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`
+					);
 				}
 
 				// Fetch calendar objects with VTODO filter
-				const calendarObjects = await this.client!.fetchCalendarObjects({
-					calendar: this.calendar!,
-					filters: vtodoFilter,
-				});
+				const calendarObjects = await this.client!.fetchCalendarObjects(
+					{
+						calendar: this.calendar!,
+						filters: vtodoFilter,
+					}
+				);
 
-				Logger.debug(`Fetched ${calendarObjects?.length ?? 0} calendar objects from server`);
+				Logger.debug(
+					`Fetched ${
+						calendarObjects?.length ?? 0
+					} calendar objects from server`
+				);
 
 				// Check if we got any objects
 				if (!calendarObjects || calendarObjects.length === 0) {
-					Logger.debug("No VTODO objects found on server (calendar may be empty)");
+					Logger.debug(
+						"No VTODO objects found on server (calendar may be empty)"
+					);
 					return [];
 				}
 
 				// Filter for VTODO objects
 				const todoObjects = calendarObjects.filter((obj) => {
-					const hasVTODO = obj.data && obj.data.includes("BEGIN:VTODO");
+					const hasVTODO =
+						obj.data && obj.data.includes("BEGIN:VTODO");
 					if (!hasVTODO) {
-						Logger.warn(`Object fetched with VTODO filter doesn't contain VTODO: ${obj.url}`);
+						Logger.warn(
+							`Object fetched with VTODO filter doesn't contain VTODO: ${obj.url}`
+						);
 					}
 					return hasVTODO;
 				});
@@ -282,18 +316,29 @@ export class CalDAVClient {
 
 			// Check for timeout
 			if (message.includes("timeout") || message.includes("ETIMEDOUT")) {
-				return new CalDAVTimeoutError(`Timeout while trying to ${operation}`);
+				return new CalDAVTimeoutError(
+					`Timeout while trying to ${operation}`
+				);
 			}
 
 			// Check for network errors
-			if (message.includes("Network") || message.includes("ECONNREFUSED") || message.includes("ENOTFOUND")) {
-				return new CalDAVNetworkError(`Network error while trying to ${operation}: ${message}`);
+			if (
+				message.includes("Network") ||
+				message.includes("ECONNREFUSED") ||
+				message.includes("ENOTFOUND")
+			) {
+				return new CalDAVNetworkError(
+					`Network error while trying to ${operation}: ${message}`
+				);
 			}
 
 			// Check for server errors
 			if (message.includes("500") || message.includes("503")) {
 				const statusMatch = message.match(/(\d{3})/);
-				const statusCode = statusMatch && statusMatch[1] ? parseInt(statusMatch[1]) : 500;
+				const statusCode =
+					statusMatch && statusMatch[1]
+						? parseInt(statusMatch[1])
+						: 500;
 				return new CalDAVServerError(
 					`Server error while trying to ${operation}: ${message}`,
 					statusCode
@@ -301,15 +346,23 @@ export class CalDAVClient {
 			}
 
 			// Check for auth errors
-			if (message.includes("401") || message.includes("403") || message.includes("Unauthorized")) {
-				return new CalDAVAuthError(`Authentication failed while trying to ${operation}`);
+			if (
+				message.includes("401") ||
+				message.includes("403") ||
+				message.includes("Unauthorized")
+			) {
+				return new CalDAVAuthError(
+					`Authentication failed while trying to ${operation}`
+				);
 			}
 
 			// Generic error
 			return new CalDAVError(`Failed to ${operation}: ${message}`);
 		}
 
-		return new CalDAVError(`Unknown error while trying to ${operation}: ${String(error)}`);
+		return new CalDAVError(
+			`Unknown error while trying to ${operation}: ${String(error)}`
+		);
 	}
 
 	/**
@@ -339,7 +392,8 @@ BEGIN:VTODO
 UID:${uid}
 DTSTAMP:${timestamp}
 SUMMARY:${summary}
-STATUS:${status}`;
+STATUS:${status}
+LAST-MODIFIED:${timestamp}`;
 
 		if (due) {
 			const dueString = this.formatDateForCalDAV(due);
@@ -445,13 +499,33 @@ END:VCALENDAR`;
 			// DEBUG
 			console.log("Update result:", result);
 
+			let newEtag = result.etag;
+
+			// If the server didn't return a new etag (common CalDAV behavior),
+			// we need to fetch the task to get the fresh etag
+			if (!newEtag) {
+				Logger.debug(
+					"Server did not return etag in update response, fetching fresh etag..."
+				);
+				const freshTask = await this.fetchTaskByUid(caldavUid);
+				if (freshTask) {
+					newEtag = freshTask.etag;
+					Logger.debug(`Fetched fresh etag: ${newEtag}`);
+				} else {
+					Logger.warn(
+						`Could not fetch fresh etag for task ${caldavUid}, using old etag`
+					);
+					newEtag = etag;
+				}
+			}
+
 			return {
 				uid: caldavUid,
 				summary,
 				due,
 				status,
 				lastModified: new Date(),
-				etag: result.etag ?? etag,
+				etag: newEtag,
 				href,
 			};
 		} catch (error) {
@@ -528,6 +602,56 @@ END:VCALENDAR`;
 	}
 
 	/**
+	 * Fetch a single task by UID to get fresh metadata (especially etag)
+	 * This is useful after updates when the server doesn't return the new etag
+	 * @param uid The CalDAV UID of the task
+	 * @returns The task with fresh metadata, or null if not found
+	 */
+	async fetchTaskByUid(uid: string): Promise<CalDAVTask | null> {
+		if (!this.client || !this.calendar) {
+			throw new CalDAVError(
+				"Client not connected. Call connect() first."
+			);
+		}
+
+		try {
+			// Fetch all tasks and find the one with matching UID
+			// This is not the most efficient but it's reliable
+			const calendarObjects = await this.client.fetchCalendarObjects({
+				calendar: this.calendar,
+				filters: {
+					"comp-filter": {
+						_attributes: { name: "VCALENDAR" },
+						"comp-filter": {
+							_attributes: { name: "VTODO" },
+						},
+					},
+				},
+			});
+
+			if (!calendarObjects) {
+				return null;
+			}
+
+			// Find the task with matching UID
+			for (const obj of calendarObjects) {
+				if (obj.data && obj.data.includes(`UID:${uid}`)) {
+					return this.parseVTODOToTask(obj);
+				}
+			}
+
+			return null;
+		} catch (error) {
+			Logger.warn(
+				`Failed to fetch task by UID ${uid}: ${
+					error instanceof Error ? error.message : String(error)
+				}`
+			);
+			return null;
+		}
+	}
+
+	/**
 	 * Parse a VTODO calendar object to CalDAVTask format
 	 */
 	private parseVTODOToTask(obj: {
@@ -536,7 +660,6 @@ END:VCALENDAR`;
 		etag?: string;
 	}): CalDAVTask {
 		const data = obj.data;
-
 		// Extract UID
 		const uidMatch = data.match(/UID:([^\r\n]+)/);
 		const uid = uidMatch?.[1] ?? "";
@@ -545,12 +668,19 @@ END:VCALENDAR`;
 		const summaryMatch = data.match(/SUMMARY:([^\r\n]+)/);
 		const summary = summaryMatch?.[1] ?? "";
 
-		// Extract DUE date
-		const dueMatch = data.match(/DUE(?:;VALUE=DATE)?:(\d{8})/);
-		const due =
-			dueMatch && dueMatch[1]
-				? this.parseDateFromCalDAV(dueMatch[1])
-				: null;
+		// Extract DUE date - handles multiple iCalendar formats:
+		// - DUE:YYYYMMDD (date only)
+		// - DUE;VALUE=DATE:YYYYMMDD (explicit date)
+		// - DUE:YYYYMMDDTHHMMSSZ (UTC datetime)
+		// - DUE:YYYYMMDDTHHMMSS (floating datetime)
+		// - DUE;TZID=...:YYYYMMDDTHHMMSS (datetime with timezone)
+		const dueMatch = data.match(/DUE(?:;[^:]+)?:(\d{8})(?:T(\d{6}))?Z?/);
+		let due: Date | null = null;
+		if (dueMatch && dueMatch[1]) {
+			const dateStr = dueMatch[1];
+			const timeStr = dueMatch[2]; // may be undefined for date-only
+			due = this.parseDateTimeFromCalDAV(dateStr, timeStr);
+		}
 
 		// Extract STATUS
 		const statusMatch = data.match(/STATUS:([^\r\n]+)/);
@@ -608,6 +738,32 @@ END:VCALENDAR`;
 		const year = dateStr.substring(0, 4);
 		const month = dateStr.substring(4, 6);
 		const day = dateStr.substring(6, 8);
+		return new Date(`${year}-${month}-${day}T00:00:00Z`);
+	}
+
+	/**
+	 * Parse CalDAV date/datetime to Date
+	 * @param dateStr Date portion (YYYYMMDD)
+	 * @param timeStr Optional time portion (HHMMSS)
+	 * @returns Date object
+	 */
+	private parseDateTimeFromCalDAV(dateStr: string, timeStr?: string): Date {
+		const year = dateStr.substring(0, 4);
+		const month = dateStr.substring(4, 6);
+		const day = dateStr.substring(6, 8);
+
+		if (timeStr) {
+			const hour = timeStr.substring(0, 2);
+			const minute = timeStr.substring(2, 4);
+			const second = timeStr.substring(4, 6);
+			// Note: We treat timezone-specified times as local time for simplicity.
+			// A more complete implementation would use the VTIMEZONE to convert.
+			return new Date(
+				`${year}-${month}-${day}T${hour}:${minute}:${second}`
+			);
+		}
+
+		// Date-only: return midnight UTC
 		return new Date(`${year}-${month}-${day}T00:00:00Z`);
 	}
 
