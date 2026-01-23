@@ -368,13 +368,27 @@ export class CalDAVClient {
 
 	/**
 	 * Create a task on CalDAV server
-	 * @param task The task data
+	 *
+	 * Feature: Obsidian Link Sync (003-obsidian-link-sync)
+	 * This method now accepts an optional description parameter that will be included
+	 * in the VTODO DESCRIPTION field. The description contains an Obsidian URI that
+	 * allows users to click a link in their CalDAV client and jump directly to the
+	 * task location in Obsidian.
+	 *
+	 * The DESCRIPTION field is RFC 5545 compliant and supported by all major CalDAV
+	 * servers. Text is properly escaped per iCalendar TEXT value specification.
+	 *
+	 * @param summary Task summary text (goes in SUMMARY field)
+	 * @param due Due date (optional)
+	 * @param status Task status (NEEDS-ACTION or COMPLETED)
+	 * @param description Optional description text with Obsidian URI (goes in DESCRIPTION field)
 	 * @returns Created CalDAV task with UID and etag
 	 */
 	async createTask(
 		summary: string,
 		due: Date | null,
-		status: VTODOStatus
+		status: VTODOStatus,
+		description?: string
 	): Promise<CalDAVTask> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
@@ -395,8 +409,15 @@ PRODID:-//Obsidian Tasks CalDAV Plugin//EN
 BEGIN:VTODO
 UID:${uid}
 DTSTAMP:${timestamp}
-SUMMARY:${escapedSummary}
-STATUS:${status}
+SUMMARY:${escapedSummary}`;
+
+		// Add DESCRIPTION field if provided (T022-T023)
+		if (description) {
+			const escapedDesc = escapeICalText(description);
+			vtodoString += `\nDESCRIPTION:${escapedDesc}`;
+		}
+
+		vtodoString += `\nSTATUS:${status}
 LAST-MODIFIED:${timestamp}`;
 
 		if (due) {

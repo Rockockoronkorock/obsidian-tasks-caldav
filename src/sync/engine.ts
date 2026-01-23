@@ -26,6 +26,7 @@ import {
 	hasConflict,
 } from "./conflictResolver";
 import { Logger } from "./logger";
+import { buildObsidianURI, buildDescriptionWithURI } from "../obsidian/uriBuilder";
 
 /**
  * Sync statistics for tracking sync progress
@@ -506,17 +507,52 @@ export class SyncEngine {
 
 	/**
 	 * Create a task on CalDAV server and store mapping
+	 *
 	 * Implements T038: CalDAV task creation and T043: Store sync mappings
+	 * Feature: Obsidian Link Sync (003-obsidian-link-sync)
+	 *
+	 * This method now generates an Obsidian deep link URI and includes it in the
+	 * CalDAV DESCRIPTION field during initial task creation. The URI enables users
+	 * to click a link in their CalDAV client (e.g., Apple Calendar, Google Calendar)
+	 * and jump directly to the task location in Obsidian.
+	 *
+	 * URI Format: obsidian://open?vault={encoded-vault}&file={encoded-path}&block={block-id}
+	 *
+	 * Error handling: URI generation failures are logged as warnings but do not
+	 * prevent task sync (graceful degradation). Tasks without block IDs will sync
+	 * successfully but without the Obsidian URI.
 	 */
 	private async createTaskOnCalDAV(task: Task): Promise<void> {
 		// Convert task to VTODO format (T037)
 		const vtodoData = taskToVTODO(task);
 
-		// Create task on CalDAV server (T038)
+		// Generate Obsidian URI with error handling (T013-T018)
+		// This provides a clickable deep link in CalDAV clients to open Obsidian
+		// directly to the task location within the source note.
+		let description: string | undefined;
+		try {
+			// Get vault name from Obsidian API (T014)
+			const vaultName = this.vault.getName();
+
+			// Validate block ID before attempting URI generation (T015)
+			if (!task.blockId) {
+				console.warn('Skipping URI generation: task missing block ID');
+			} else {
+				// Generate URI and format DESCRIPTION (T016)
+				const uri = buildObsidianURI(vaultName, task.filePath, task.blockId);
+				description = buildDescriptionWithURI(uri);
+			}
+		} catch (error) {
+			// Log warning but continue task creation - graceful degradation (T018)
+			console.warn(`Failed to generate Obsidian URI for task: ${error instanceof Error ? error.message : String(error)}`);
+		}
+
+		// Create task on CalDAV server with optional description (T017, T038)
 		const caldavTask = await this.client.createTask(
 			vtodoData.summary,
 			vtodoData.due,
-			vtodoData.status
+			vtodoData.status,
+			description
 		);
 
 		Logger.debug(`Created CalDAV task: ${caldavTask.uid}`);
