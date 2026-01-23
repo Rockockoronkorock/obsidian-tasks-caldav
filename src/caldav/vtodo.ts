@@ -5,6 +5,7 @@
 
 import { Task, TaskStatus, CalDAVTask, VTODOStatus } from "../types";
 import { toCalDAVDate, parseCalDAVDate } from "../vault/taskParser";
+import { Logger } from "../sync/logger";
 
 /**
  * Convert an Obsidian Task to CalDAV VTODO format
@@ -191,11 +192,8 @@ export function updateVTODOProperties(
 	status: VTODOStatus
 ): string {
 	// T034: Debug logging for property preservation
-	if (typeof console !== 'undefined' && console.log) {
-		// Only log in debug builds - production builds will strip this
-		const inputLength = existingVTODO.length;
-		console.log(`[VTODO Update] Input length: ${inputLength} chars`);
-	}
+	const inputLength = existingVTODO.length;
+	Logger.debug(`[VTODO Update] Input length: ${inputLength} chars`);
 
 	let updated = existingVTODO;
 
@@ -265,10 +263,8 @@ export function updateVTODOProperties(
 	}
 
 	// T034: Debug logging for output
-	if (typeof console !== 'undefined' && console.log) {
-		const outputLength = updated.length;
-		console.log(`[VTODO Update] Output length: ${outputLength} chars`);
-	}
+	const outputLength = updated.length;
+	Logger.debug(`[VTODO Update] Output length: ${outputLength} chars`);
 
 	return updated;
 }

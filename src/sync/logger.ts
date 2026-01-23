@@ -22,7 +22,7 @@ export class Logger {
 	 * Log an informational message
 	 */
 	static info(message: string, ...args: unknown[]): void {
-		console.log(`[CalDAV Sync] ${message}`, ...args);
+		console.warn(`[CalDAV Sync] ${message}`, ...args);
 	}
 
 	/**
@@ -35,7 +35,7 @@ export class Logger {
 	/**
 	 * Log an error message
 	 */
-	static error(message: string, error?: Error | unknown): void {
+	static error(message: string, error?: unknown): void {
 		if (error) {
 			console.error(`[CalDAV Sync] ${message}`, error);
 		} else {
@@ -48,7 +48,7 @@ export class Logger {
 	 */
 	static debug(message: string, ...args: unknown[]): void {
 		if (DEBUG) {
-			console.log(`[CalDAV Sync DEBUG] ${message}`, ...args);
+			console.debug(`[CalDAV Sync DEBUG] ${message}`, ...args);
 		}
 	}
 

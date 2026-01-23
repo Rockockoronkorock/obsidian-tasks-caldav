@@ -4,7 +4,7 @@
  * Uses last-write-wins strategy based on modification timestamps
  */
 
-import { Task, CalDAVTask, SyncMapping, TaskStatus } from "../types";
+import { Task, CalDAVTask, SyncMapping } from "../types";
 
 /**
  * Represents the resolution of a sync conflict

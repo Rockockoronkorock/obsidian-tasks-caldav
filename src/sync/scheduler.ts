@@ -49,7 +49,9 @@ export class SyncScheduler {
 
 		// Start periodic sync
 		this.intervalId = window.setInterval(
-			() => this.performSync(true),
+			() => {
+				void this.performSync(true);
+			},
 			this.config.syncInterval * 1000
 		);
 

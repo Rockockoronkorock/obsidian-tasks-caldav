@@ -14,11 +14,28 @@ import {
 	CalDAVConflictError,
 	CalDAVServerError,
 	CalDAVTimeoutError,
-	CalDAVRateLimitError,
 } from "./errors";
 import { withRetry } from "./retry";
 import { Logger } from "../sync/logger";
 import { updateVTODOProperties, escapeICalText } from "./vtodo";
+
+/**
+ * CalDAV filter structure for querying tasks
+ */
+interface CalDAVFilter {
+	"comp-filter": {
+		_attributes: { name: string };
+		"comp-filter"?: {
+			_attributes: { name: string };
+			"prop-filter"?: {
+				_attributes: { name: string };
+				"time-range"?: {
+					_attributes: { start?: string; end?: string };
+				};
+			};
+		};
+	};
+}
 
 /**
  * Minimal tsdav client interface for our needs
@@ -27,7 +44,7 @@ interface MinimalDAVClient {
 	fetchCalendars: () => Promise<DAVCalendar[]>;
 	fetchCalendarObjects: (params: {
 		calendar: DAVCalendar;
-		filters?: any; // Custom filters for VTODO, VEVENT, etc.
+		filters?: CalDAVFilter;
 	}) => Promise<Array<{ url: string; data: string; etag?: string }>>;
 	createCalendarObject: (params: {
 		calendar: DAVCalendar;
@@ -109,11 +126,10 @@ export class CalDAVClient {
 					throw new CalDAVError("No calendar found on server");
 				}
 
-				Logger.info(
-					`Connected to CalDAV calendar: ${
-						this.calendar.displayName ?? this.calendar.url
-					}`
-				);
+				const displayName = typeof this.calendar.displayName === "string"
+					? this.calendar.displayName
+					: this.calendar.url;
+				Logger.info(`Connected to CalDAV calendar: ${displayName}`);
 			} catch (error) {
 				// Transform error into appropriate CalDAV error type
 				throw this.handleConnectionError(error);
@@ -203,7 +219,7 @@ export class CalDAVClient {
 			await this.connect();
 			await this.disconnect();
 			return true;
-		} catch (error) {
+		} catch {
 			return false;
 		}
 	}
@@ -228,7 +244,7 @@ export class CalDAVClient {
 				Logger.debug("Fetching tasks from CalDAV server...");
 
 				// Create filter for VTODO items (tasks) instead of default VEVENT (events)
-				let vtodoFilter: any = {
+				let vtodoFilter: CalDAVFilter = {
 					"comp-filter": {
 						_attributes: { name: "VCALENDAR" },
 						"comp-filter": {
@@ -246,14 +262,17 @@ export class CalDAVClient {
 						completedTaskAgeThreshold
 					);
 
-					vtodoFilter["comp-filter"]["comp-filter"]["prop-filter"] = {
-						_attributes: { name: "LAST-MODIFIED" },
-						"time-range": {
-							_attributes: {
-								start: thresholdStr,
+					const compFilter = vtodoFilter["comp-filter"]["comp-filter"];
+					if (compFilter) {
+						compFilter["prop-filter"] = {
+							_attributes: { name: "LAST-MODIFIED" },
+							"time-range": {
+								_attributes: {
+									start: thresholdStr,
+								},
 							},
-						},
-					};
+						};
+					}
 
 					Logger.debug(
 						`Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`
@@ -501,16 +520,15 @@ END:VTODO
 END:VCALENDAR`;
 
 		// DEBUG
-		console.log("=== CalDAV Update Debug ===");
-		console.log("Updating task:", caldavUid);
-		console.log("Summary:", summary);
-		console.log("Status:", status);
-		console.log("Due:", due?.toISOString());
-		console.log("ETag:", etag);
-		console.log("URL:", href);
-		console.log("VTODO data:");
-		console.log(vtodoString);
-		console.log("===========================");
+		Logger.debug("=== CalDAV Update Debug ===");
+		Logger.debug(`Updating task: ${caldavUid}`);
+		Logger.debug(`Summary: ${summary}`);
+		Logger.debug(`Status: ${status}`);
+		Logger.debug(`Due: ${due?.toISOString() ?? 'none'}`);
+		Logger.debug(`ETag: ${etag}`);
+		Logger.debug(`URL: ${href}`);
+		Logger.debug("VTODO data:", vtodoString);
+		Logger.debug("===========================");
 
 		try {
 			const result = await this.client.updateCalendarObject({
@@ -522,7 +540,7 @@ END:VCALENDAR`;
 			});
 
 			// DEBUG
-			console.log("Update result:", result);
+			Logger.debug("Update result:", result);
 
 			let newEtag = result.etag;
 
@@ -554,15 +572,9 @@ END:VCALENDAR`;
 				href,
 			};
 		} catch (error) {
-			console.error("CalDAV update error:", error);
+			Logger.error("CalDAV update error", error);
 
 			if (error instanceof Error) {
-				console.error("Error details:", {
-					message: error.message,
-					stack: error.stack,
-					name: error.name,
-				});
-
 				// T049: Handle 412 Precondition Failed (ETag conflict)
 				if (
 					error.message.includes("412") ||

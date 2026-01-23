@@ -79,7 +79,11 @@ export async function obsidianFetch(
 	input: RequestInfo | URL,
 	init?: RequestInit
 ): Promise<Response> {
-	const url = typeof input === "string" ? input : input.toString();
+	const url = typeof input === "string"
+		? input
+		: input instanceof URL
+			? input.toString()
+			: input.url;
 
 	const requestParams: RequestUrlParam = {
 		url,
@@ -104,7 +108,7 @@ export async function obsidianFetch(
 				}
 			});
 		} else {
-			requestParams.headers = init.headers as Record<string, string>;
+			requestParams.headers = init.headers;
 		}
 	}
 
@@ -116,16 +120,15 @@ export async function obsidianFetch(
 			requestParams.body = new TextDecoder().decode(init.body);
 		} else if (init.body instanceof Blob) {
 			requestParams.body = await init.body.text();
-		} else {
-			requestParams.body = String(init.body);
+		} else if (init.body instanceof URLSearchParams) {
+			requestParams.body = init.body.toString();
+		} else if (init.body instanceof FormData) {
+			// FormData isn't directly supported, would need multipart encoding
+			throw new Error("FormData is not supported in obsidianFetch");
 		}
+		// Note: ReadableStream is not supported by Obsidian's requestUrl
 	}
 
-	try {
-		const response = await requestUrl(requestParams);
-		return new ObsidianResponse(response);
-	} catch (error) {
-		// requestUrl throws on network errors
-		throw error;
-	}
+	const response = await requestUrl(requestParams);
+	return new ObsidianResponse(response);
 }

@@ -63,7 +63,7 @@ class SyncErrorModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 
-		contentEl.createEl('h2', { text: 'Automatic Sync Error' });
+		contentEl.createEl('h2', { text: 'Automatic sync error' });
 		contentEl.createEl('p', { text: 'An error occurred during automatic sync:' });
 		contentEl.createEl('p', { text: this.error, cls: 'mod-error' });
 
@@ -75,7 +75,7 @@ class SyncErrorModal extends Modal {
 			});
 		}
 
-		contentEl.createEl('p', { text: 'Please check your CalDAV connection settings.' });
+		contentEl.createEl('p', { text: 'Please check your connection settings.' });
 
 		const buttonDiv = contentEl.createDiv({ cls: 'modal-button-container' });
 		const closeButton = buttonDiv.createEl('button', { text: 'Close' });

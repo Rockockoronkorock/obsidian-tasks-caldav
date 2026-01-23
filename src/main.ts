@@ -5,7 +5,7 @@ import { CalDAVSettingsTab } from "./ui/settingsTab";
 import { SyncScheduler } from "./sync/scheduler";
 import { SyncEngine } from "./sync/engine";
 import { loadMappings, saveMappings } from "./sync/mapping";
-import { setDebugMode } from "./sync/logger";
+import { setDebugMode, Logger } from "./sync/logger";
 
 /**
  * Main plugin class for CalDAV Task Synchronization
@@ -20,7 +20,7 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 	 * Plugin initialization - called when plugin is loaded
 	 */
 	async onload() {
-		console.log("Loading CalDAV Task Sync plugin");
+		Logger.info("Loading CalDAV Task Sync plugin");
 
 		// Load saved settings
 		await this.loadSettings();
@@ -67,7 +67,7 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 	 * Plugin cleanup - called when plugin is unloaded
 	 */
 	onunload() {
-		console.log("Unloading CalDAV Task Sync plugin");
+		Logger.info("Unloading CalDAV Task Sync plugin");
 
 		// Stop sync scheduler
 		if (this.syncScheduler) {
@@ -88,7 +88,7 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 	 */
 	private async performSync(isAutoSync: boolean = false): Promise<number> {
 		if (!this.syncEngine) {
-			console.error("Sync engine not initialized");
+			Logger.error("Sync engine not initialized");
 			return 0;
 		}
 
@@ -97,7 +97,7 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 			await this.syncEngine.syncObsidianToCalDAV(isAutoSync);
 			return 0; // TODO: Return actual count in future
 		} catch (error) {
-			console.error("Sync failed:", error);
+			Logger.error("Sync failed", error);
 			throw error;
 		}
 	}
