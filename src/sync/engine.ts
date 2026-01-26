@@ -47,6 +47,11 @@ export class SyncEngine {
 	private client: CalDAVClient;
 	private filter: SyncFilter;
 	private saveData: () => Promise<void>;
+	/**
+	 * Performance optimization: Track if mappings have been modified
+	 * Enables batched persistence instead of saving after every task operation
+	 */
+	private dirtyMappings = false;
 
 	constructor(
 		app: App,
@@ -102,12 +107,30 @@ export class SyncEngine {
 			// Disconnect from CalDAV
 			await this.client.disconnect();
 
+			// Performance optimization: Batched persistence
+			// Save mappings once at the end instead of after every task operation
+			if (this.dirtyMappings) {
+				Logger.debug("Persisting mapping changes to disk");
+				await this.saveData();
+				this.dirtyMappings = false;
+			}
+
 			// Show sync results
 			this.showSyncResults(stats, isAutoSync);
 
 			// T020: Log sync completion at INFO level (always shown)
 			Logger.syncComplete();
 		} catch (error) {
+			// On error, still save partial progress to preserve mappings created so far
+			if (this.dirtyMappings) {
+				Logger.debug("Sync failed, persisting partial progress");
+				try {
+					await this.saveData();
+					this.dirtyMappings = false;
+				} catch (saveError) {
+					Logger.error("Failed to save partial progress", saveError);
+				}
+			}
 			this.handleSyncError(error);
 			throw error;
 		}
@@ -143,24 +166,33 @@ export class SyncEngine {
 
 	/**
 	 * Fetch tasks from both Obsidian vault and CalDAV server
+	 * Performance optimization: Returns CalDAV tasks as a Map indexed by UID for O(1) lookups
 	 * @param isAutoSync Whether this is an automatic sync (T016, 002-sync-polish)
 	 */
 	private async fetchAllTasks(isAutoSync: boolean = false): Promise<{
-		caldavTasks: CalDAVTask[];
+		caldavTasks: Map<string, CalDAVTask>;
 		obsidianTasks: Task[];
 	}> {
 		// Calculate age threshold for completed tasks
 		const ageThreshold = this.calculateAgeThreshold();
 
 		// Fetch from CalDAV with server-side filtering
-		const caldavTasks = await this.client.fetchAllTasks(ageThreshold);
-		Logger.info(`Fetched ${caldavTasks.length} tasks from CalDAV server`);
+		const caldavTaskArray = await this.client.fetchAllTasks(ageThreshold);
+		Logger.info(`Fetched ${caldavTaskArray.length} tasks from CalDAV server`);
 
 		if (ageThreshold) {
 			Logger.debug(
 				`Server-side filtering active: excluding tasks older than ${ageThreshold.toISOString()}`
 			);
 		}
+
+		// Performance optimization: Index CalDAV tasks by UID for O(1) lookups
+		// This converts O(n²) complexity to O(n) during sync processing
+		const caldavTasks = new Map<string, CalDAVTask>();
+		for (const task of caldavTaskArray) {
+			caldavTasks.set(task.uid, task);
+		}
+		Logger.debug(`Indexed ${caldavTasks.size} CalDAV tasks by UID`);
 
 		// Scan vault for tasks
 		const allTasks = await scanVaultForTasks(this.vault);
@@ -215,7 +247,7 @@ export class SyncEngine {
 	 */
 	private async processObsidianTasks(
 		obsidianTasks: Task[],
-		caldavTasks: CalDAVTask[],
+		caldavTasks: Map<string, CalDAVTask>,
 		stats: SyncStats
 	): Promise<void> {
 		for (const task of obsidianTasks) {
@@ -232,7 +264,7 @@ export class SyncEngine {
 	 */
 	private async processTask(
 		task: Task,
-		caldavTasks: CalDAVTask[],
+		caldavTasks: Map<string, CalDAVTask>,
 		stats: SyncStats
 	): Promise<void> {
 		// Handle untracked tasks (no block ID)
@@ -253,10 +285,8 @@ export class SyncEngine {
 		// Refresh mapping metadata if needed
 		await this.refreshMappingMetadata(mapping, caldavTasks);
 
-		// Find corresponding CalDAV task
-		const caldavTask = caldavTasks.find(
-			(ct) => ct.uid === mapping.caldavUid
-		);
+		// Find corresponding CalDAV task (O(1) lookup with Map)
+		const caldavTask = caldavTasks.get(mapping.caldavUid);
 
 		if (!caldavTask) {
 			Logger.warn(`CalDAV task not found for UID ${mapping.caldavUid}`);
@@ -283,7 +313,7 @@ export class SyncEngine {
 	 */
 	private async getOrCreateMapping(
 		task: Task,
-		caldavTasks: CalDAVTask[]
+		caldavTasks: Map<string, CalDAVTask>
 	): Promise<SyncMapping | null> {
 		// Check for existing mapping
 		let mapping = getMappingByBlockId(task.blockId);
@@ -319,7 +349,7 @@ export class SyncEngine {
 	 */
 	private async refreshMappingMetadata(
 		mapping: SyncMapping,
-		caldavTasks: CalDAVTask[]
+		caldavTasks: Map<string, CalDAVTask>
 	): Promise<void> {
 		// Check if metadata is missing
 		if (mapping.caldavHref && mapping.caldavEtag) {
@@ -328,10 +358,8 @@ export class SyncEngine {
 
 		Logger.debug(`Refreshing mapping metadata for task ${mapping.blockId}`);
 
-		// Find the corresponding CalDAV task
-		const caldavTask = caldavTasks.find(
-			(ct) => ct.uid === mapping.caldavUid
-		);
+		// Find the corresponding CalDAV task (O(1) lookup with Map)
+		const caldavTask = caldavTasks.get(mapping.caldavUid);
 
 		if (!caldavTask) {
 			Logger.warn(
@@ -346,7 +374,8 @@ export class SyncEngine {
 		mapping.caldavEtag = caldavTask.etag;
 
 		setMapping(mapping);
-		await this.saveData();
+		// Performance optimization: Mark dirty instead of saving immediately
+		this.dirtyMappings = true;
 
 		Logger.debug(`Metadata refreshed for task ${mapping.blockId}`);
 	}
@@ -574,8 +603,8 @@ export class SyncEngine {
 
 		setMapping(mapping);
 
-		// Persist mappings to plugin data
-		await this.saveData();
+		// Performance optimization: Mark dirty instead of saving immediately
+		this.dirtyMappings = true;
 	}
 
 	/**
@@ -726,8 +755,8 @@ export class SyncEngine {
 
 		setMapping(mapping);
 
-		// Persist mappings to plugin data
-		await this.saveData();
+		// Performance optimization: Mark dirty instead of saving immediately
+		this.dirtyMappings = true;
 	}
 
 	/**
@@ -766,25 +795,30 @@ export class SyncEngine {
 
 		setMapping(mapping);
 
-		// Persist mappings to plugin data
-		await this.saveData();
+		// Performance optimization: Mark dirty instead of saving immediately
+		this.dirtyMappings = true;
 	}
 
 	/**
 	 * Find a CalDAV task by matching description
 	 * Used for reconciliation when mapping is lost
-	 * @param caldavTasks List of CalDAV tasks
+	 * @param caldavTasks Map of CalDAV tasks indexed by UID
 	 * @param description Task description to match
 	 * @returns Matching CalDAV task or undefined
 	 */
 	private async findCalDAVTaskByDescription(
-		caldavTasks: CalDAVTask[],
+		caldavTasks: Map<string, CalDAVTask>,
 		description: string
 	): Promise<CalDAVTask | undefined> {
 		// Match by description (case-insensitive)
-		return caldavTasks.find(
-			(ct) => ct.summary.toLowerCase() === description.toLowerCase()
-		);
+		// Note: This is still O(n) but only used during reconciliation (rare case)
+		const lowerDescription = description.toLowerCase();
+		for (const task of caldavTasks.values()) {
+			if (task.summary.toLowerCase() === lowerDescription) {
+				return task;
+			}
+		}
+		return undefined;
 	}
 
 	/**
