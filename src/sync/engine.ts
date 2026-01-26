@@ -4,7 +4,7 @@
  * Refactored for Phase 9: Polish & Cross-Cutting Concerns
  */
 
-import { Vault, Notice } from "obsidian";
+import { Vault, Notice, App } from "obsidian";
 import { Task, CalDAVConfiguration, SyncMapping, CalDAVTask } from "../types";
 import { CalDAVClient } from "../caldav/client";
 import { SyncFilter } from "./filters";
@@ -41,6 +41,7 @@ interface SyncStats {
  * Sync engine class for orchestrating task synchronization
  */
 export class SyncEngine {
+	private app: App;
 	private vault: Vault;
 	private config: CalDAVConfiguration;
 	private client: CalDAVClient;
@@ -48,13 +49,15 @@ export class SyncEngine {
 	private saveData: () => Promise<void>;
 
 	constructor(
+		app: App,
 		vault: Vault,
 		config: CalDAVConfiguration,
 		saveData: () => Promise<void>
 	) {
+		this.app = app;
 		this.vault = vault;
 		this.config = config;
-		this.client = new CalDAVClient(config);
+		this.client = new CalDAVClient(app, config);
 		this.filter = new SyncFilter(config);
 		this.saveData = saveData;
 	}
@@ -743,8 +746,9 @@ export class SyncEngine {
 		// Convert CalDAV task to Obsidian format
 		const updatedData = vtodoToTask(caldavTask);
 
-		// Update task in vault
+		// Update task in vault (uses Tasks Plugin API if available)
 		await updateTaskInVault(
+			this.app,
 			this.vault,
 			task,
 			updatedData.description,

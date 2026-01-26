@@ -8,7 +8,7 @@
  */
 export enum TaskStatus {
 	Open = "open",
-	Completed = "completed"
+	Completed = "completed",
 }
 
 /**
@@ -16,7 +16,7 @@ export enum TaskStatus {
  */
 export enum VTODOStatus {
 	NeedsAction = "NEEDS-ACTION",
-	Completed = "COMPLETED"
+	Completed = "COMPLETED",
 }
 
 /**
@@ -67,13 +67,13 @@ export interface SyncMapping {
 
 /**
  * User-provided settings for connecting to the CalDAV server
+ * Note: Password is stored separately using Obsidian's SecretStorage API for security
  */
 export interface CalDAVConfiguration {
 	/** Base URL of the CalDAV server (must be HTTPS) */
 	serverUrl: string;
 	/** Username for authentication */
 	username: string;
-	/** Password or app-specific token */
 	password: string;
 	/** Path to the calendar on the server */
 	calendarPath: string;

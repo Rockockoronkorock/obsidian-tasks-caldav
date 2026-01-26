@@ -5,6 +5,7 @@
  * Implements T073: Retry logic with exponential backoff
  */
 
+import { App } from "obsidian";
 import { DAVClient, DAVCalendar } from "tsdav";
 import { CalDAVConfiguration, CalDAVTask, VTODOStatus } from "../types";
 import {
@@ -66,8 +67,10 @@ export class CalDAVClient {
 	private client: MinimalDAVClient | null = null;
 	private calendar: DAVCalendar | null = null;
 	private config: CalDAVConfiguration;
+	private app: App;
 
-	constructor(config: CalDAVConfiguration) {
+	constructor(app: App, config: CalDAVConfiguration) {
+		this.app = app;
 		this.config = config;
 	}
 
@@ -80,12 +83,22 @@ export class CalDAVClient {
 			try {
 				Logger.debug("Connecting to CalDAV server...");
 
+				// Retrieve password from SecretStorage
+				const password = this.app.secretStorage.getSecret(
+					this.config.password,
+				);
+				if (!password) {
+					throw new CalDAVAuthError(
+						"Password not found in secure storage. Please configure your CalDAV password in settings.",
+					);
+				}
+
 				// Create DAVClient
 				const davClient = new DAVClient({
 					serverUrl: this.config.serverUrl,
 					credentials: {
 						username: this.config.username,
-						password: this.config.password,
+						password: password,
 					},
 					authMethod: "Basic",
 					defaultAccountType: "caldav",
@@ -100,25 +113,25 @@ export class CalDAVClient {
 				const calendars = await this.client.fetchCalendars();
 
 				Logger.debug(
-					`Found ${calendars?.length ?? 0} calendars on server`
+					`Found ${calendars?.length ?? 0} calendars on server`,
 				);
 
 				// Try to match by calendar path or use first available calendar
 				if (this.config.calendarPath && calendars) {
 					this.calendar =
 						calendars.find((cal) =>
-							cal.url.includes(this.config.calendarPath)
+							cal.url.includes(this.config.calendarPath),
 						) ??
 						calendars[0] ??
 						null;
 
 					Logger.debug(
-						`Selected calendar by path "${this.config.calendarPath}": ${this.calendar?.url}`
+						`Selected calendar by path "${this.config.calendarPath}": ${this.calendar?.url}`,
 					);
 				} else if (calendars) {
 					this.calendar = calendars[0] ?? null;
 					Logger.debug(
-						`Selected first available calendar: ${this.calendar?.url}`
+						`Selected first available calendar: ${this.calendar?.url}`,
 					);
 				}
 
@@ -126,9 +139,10 @@ export class CalDAVClient {
 					throw new CalDAVError("No calendar found on server");
 				}
 
-				const displayName = typeof this.calendar.displayName === "string"
-					? this.calendar.displayName
-					: this.calendar.url;
+				const displayName =
+					typeof this.calendar.displayName === "string"
+						? this.calendar.displayName
+						: this.calendar.url;
 				Logger.info(`Connected to CalDAV calendar: ${displayName}`);
 			} catch (error) {
 				// Transform error into appropriate CalDAV error type
@@ -152,7 +166,7 @@ export class CalDAVClient {
 			// Check for authentication errors
 			if (message.includes("401") || message.includes("Unauthorized")) {
 				return new CalDAVAuthError(
-					"Authentication failed. Please check your credentials."
+					"Authentication failed. Please check your credentials.",
 				);
 			}
 
@@ -163,21 +177,21 @@ export class CalDAVClient {
 			) {
 				return new CalDAVNetworkError(
 					`Cannot connect to server at ${this.config.serverUrl}. ` +
-						"Please ensure the CalDAV server is running and accessible."
+						"Please ensure the CalDAV server is running and accessible.",
 				);
 			}
 
 			// Check for timeout errors
 			if (message.includes("ETIMEDOUT") || message.includes("timeout")) {
 				return new CalDAVTimeoutError(
-					"Connection timed out. Please check your server URL and internet connection."
+					"Connection timed out. Please check your server URL and internet connection.",
 				);
 			}
 
 			// Check for other network errors
 			if (message.includes("ENOTFOUND") || message.includes("Network")) {
 				return new CalDAVNetworkError(
-					"Network error. Please check your server URL and internet connection."
+					"Network error. Please check your server URL and internet connection.",
 				);
 			}
 
@@ -190,7 +204,7 @@ export class CalDAVClient {
 						: 500;
 				return new CalDAVServerError(
 					`Server error: ${message}`,
-					statusCode
+					statusCode,
 				);
 			}
 
@@ -231,11 +245,11 @@ export class CalDAVClient {
 	 * @returns Array of CalDAV tasks
 	 */
 	async fetchAllTasks(
-		completedTaskAgeThreshold?: Date
+		completedTaskAgeThreshold?: Date,
 	): Promise<CalDAVTask[]> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
-				"Client not connected. Call connect() first."
+				"Client not connected. Call connect() first.",
 			);
 		}
 
@@ -259,10 +273,11 @@ export class CalDAVClient {
 					completedTaskAgeThreshold.getTime() !== 0
 				) {
 					const thresholdStr = this.formatDateTimeForCalDAV(
-						completedTaskAgeThreshold
+						completedTaskAgeThreshold,
 					);
 
-					const compFilter = vtodoFilter["comp-filter"]["comp-filter"];
+					const compFilter =
+						vtodoFilter["comp-filter"]["comp-filter"];
 					if (compFilter) {
 						compFilter["prop-filter"] = {
 							_attributes: { name: "LAST-MODIFIED" },
@@ -275,7 +290,7 @@ export class CalDAVClient {
 					}
 
 					Logger.debug(
-						`Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`
+						`Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`,
 					);
 				}
 
@@ -284,19 +299,19 @@ export class CalDAVClient {
 					{
 						calendar: this.calendar!,
 						filters: vtodoFilter,
-					}
+					},
 				);
 
 				Logger.debug(
 					`Fetched ${
 						calendarObjects?.length ?? 0
-					} calendar objects from server`
+					} calendar objects from server`,
 				);
 
 				// Check if we got any objects
 				if (!calendarObjects || calendarObjects.length === 0) {
 					Logger.debug(
-						"No VTODO objects found on server (calendar may be empty)"
+						"No VTODO objects found on server (calendar may be empty)",
 					);
 					return [];
 				}
@@ -307,7 +322,7 @@ export class CalDAVClient {
 						obj.data && obj.data.includes("BEGIN:VTODO");
 					if (!hasVTODO) {
 						Logger.warn(
-							`Object fetched with VTODO filter doesn't contain VTODO: ${obj.url}`
+							`Object fetched with VTODO filter doesn't contain VTODO: ${obj.url}`,
 						);
 					}
 					return hasVTODO;
@@ -337,7 +352,7 @@ export class CalDAVClient {
 			// Check for timeout
 			if (message.includes("timeout") || message.includes("ETIMEDOUT")) {
 				return new CalDAVTimeoutError(
-					`Timeout while trying to ${operation}`
+					`Timeout while trying to ${operation}`,
 				);
 			}
 
@@ -348,7 +363,7 @@ export class CalDAVClient {
 				message.includes("ENOTFOUND")
 			) {
 				return new CalDAVNetworkError(
-					`Network error while trying to ${operation}: ${message}`
+					`Network error while trying to ${operation}: ${message}`,
 				);
 			}
 
@@ -361,7 +376,7 @@ export class CalDAVClient {
 						: 500;
 				return new CalDAVServerError(
 					`Server error while trying to ${operation}: ${message}`,
-					statusCode
+					statusCode,
 				);
 			}
 
@@ -372,7 +387,7 @@ export class CalDAVClient {
 				message.includes("Unauthorized")
 			) {
 				return new CalDAVAuthError(
-					`Authentication failed while trying to ${operation}`
+					`Authentication failed while trying to ${operation}`,
 				);
 			}
 
@@ -381,7 +396,7 @@ export class CalDAVClient {
 		}
 
 		return new CalDAVError(
-			`Unknown error while trying to ${operation}: ${String(error)}`
+			`Unknown error while trying to ${operation}: ${String(error)}`,
 		);
 	}
 
@@ -407,11 +422,11 @@ export class CalDAVClient {
 		summary: string,
 		due: Date | null,
 		status: VTODOStatus,
-		description?: string
+		description?: string,
 	): Promise<CalDAVTask> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
-				"Client not connected. Call connect() first."
+				"Client not connected. Call connect() first.",
 			);
 		}
 
@@ -467,7 +482,7 @@ END:VCALENDAR`;
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new CalDAVError(
-					`Failed to create task: ${error.message}`
+					`Failed to create task: ${error.message}`,
 				);
 			}
 			throw error;
@@ -489,11 +504,11 @@ END:VCALENDAR`;
 		due: Date | null,
 		status: VTODOStatus,
 		etag: string,
-		href: string
+		href: string,
 	): Promise<CalDAVTask> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
-				"Client not connected. Call connect() first."
+				"Client not connected. Call connect() first.",
 			);
 		}
 
@@ -524,7 +539,7 @@ END:VCALENDAR`;
 		Logger.debug(`Updating task: ${caldavUid}`);
 		Logger.debug(`Summary: ${summary}`);
 		Logger.debug(`Status: ${status}`);
-		Logger.debug(`Due: ${due?.toISOString() ?? 'none'}`);
+		Logger.debug(`Due: ${due?.toISOString() ?? "none"}`);
 		Logger.debug(`ETag: ${etag}`);
 		Logger.debug(`URL: ${href}`);
 		Logger.debug("VTODO data:", vtodoString);
@@ -548,7 +563,7 @@ END:VCALENDAR`;
 			// we need to fetch the task to get the fresh etag
 			if (!newEtag) {
 				Logger.debug(
-					"Server did not return etag in update response, fetching fresh etag..."
+					"Server did not return etag in update response, fetching fresh etag...",
 				);
 				const freshTask = await this.fetchTaskByUid(caldavUid);
 				if (freshTask) {
@@ -556,7 +571,7 @@ END:VCALENDAR`;
 					Logger.debug(`Fetched fresh etag: ${newEtag}`);
 				} else {
 					Logger.warn(
-						`Could not fetch fresh etag for task ${caldavUid}, using old etag`
+						`Could not fetch fresh etag for task ${caldavUid}, using old etag`,
 					);
 					newEtag = etag;
 				}
@@ -582,7 +597,7 @@ END:VCALENDAR`;
 				) {
 					throw new CalDAVConflictError(
 						`Task was modified on server. Please sync again to get latest version.`,
-						etag
+						etag,
 					);
 				}
 
@@ -592,12 +607,12 @@ END:VCALENDAR`;
 					error.message.includes("ECONNREFUSED")
 				) {
 					throw new CalDAVNetworkError(
-						`Cannot reach CalDAV server to update task. Server may be offline.`
+						`Cannot reach CalDAV server to update task. Server may be offline.`,
 					);
 				}
 
 				throw new CalDAVError(
-					`Failed to update task: ${error.message}`
+					`Failed to update task: ${error.message}`,
 				);
 			}
 			throw error;
@@ -621,11 +636,11 @@ END:VCALENDAR`;
 		due: Date | null,
 		status: VTODOStatus,
 		etag: string,
-		href: string
+		href: string,
 	): Promise<CalDAVTask> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
-				"Client not connected. Call connect() first."
+				"Client not connected. Call connect() first.",
 			);
 		}
 
@@ -635,18 +650,20 @@ END:VCALENDAR`;
 
 			if (!existingVTODO) {
 				throw new CalDAVError(
-					`Task with UID ${caldavUid} not found on server. It may have been deleted.`
+					`Task with UID ${caldavUid} not found on server. It may have been deleted.`,
 				);
 			}
 
-			Logger.debug(`Updating task ${caldavUid} with property preservation`);
+			Logger.debug(
+				`Updating task ${caldavUid} with property preservation`,
+			);
 
 			// T026: Update only managed properties, preserving everything else
 			const updatedVTODO = updateVTODOProperties(
 				existingVTODO,
 				summary,
 				due,
-				status
+				status,
 			);
 
 			// Send the modified VTODO back to the server
@@ -663,7 +680,7 @@ END:VCALENDAR`;
 			// If the server didn't return a new etag, fetch it
 			if (!newEtag) {
 				Logger.debug(
-					"Server did not return etag in update response, fetching fresh etag..."
+					"Server did not return etag in update response, fetching fresh etag...",
 				);
 				const freshTask = await this.fetchTaskByUid(caldavUid);
 				if (freshTask) {
@@ -671,13 +688,15 @@ END:VCALENDAR`;
 					Logger.debug(`Fetched fresh etag: ${newEtag}`);
 				} else {
 					Logger.warn(
-						`Could not fetch fresh etag for task ${caldavUid}, using old etag`
+						`Could not fetch fresh etag for task ${caldavUid}, using old etag`,
 					);
 					newEtag = etag;
 				}
 			}
 
-			Logger.debug(`Task ${caldavUid} updated successfully with preserved properties`);
+			Logger.debug(
+				`Task ${caldavUid} updated successfully with preserved properties`,
+			);
 
 			return {
 				uid: caldavUid,
@@ -697,7 +716,7 @@ END:VCALENDAR`;
 				) {
 					throw new CalDAVConflictError(
 						`Task was modified on server. Please sync again to get latest version.`,
-						etag
+						etag,
 					);
 				}
 
@@ -707,12 +726,12 @@ END:VCALENDAR`;
 					error.message.includes("ECONNREFUSED")
 				) {
 					throw new CalDAVNetworkError(
-						`Cannot reach CalDAV server to update task. Server may be offline.`
+						`Cannot reach CalDAV server to update task. Server may be offline.`,
 					);
 				}
 
 				throw new CalDAVError(
-					`Failed to update task with preservation: ${error.message}`
+					`Failed to update task with preservation: ${error.message}`,
 				);
 			}
 			throw error;
@@ -728,11 +747,11 @@ END:VCALENDAR`;
 	async deleteTask(
 		caldavUid: string,
 		etag: string,
-		href: string
+		href: string,
 	): Promise<void> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
-				"Client not connected. Call connect() first."
+				"Client not connected. Call connect() first.",
 			);
 		}
 
@@ -746,7 +765,7 @@ END:VCALENDAR`;
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new CalDAVError(
-					`Failed to delete task: ${error.message}`
+					`Failed to delete task: ${error.message}`,
 				);
 			}
 			throw error;
@@ -762,7 +781,7 @@ END:VCALENDAR`;
 	async fetchTaskByUid(uid: string): Promise<CalDAVTask | null> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
-				"Client not connected. Call connect() first."
+				"Client not connected. Call connect() first.",
 			);
 		}
 
@@ -797,7 +816,7 @@ END:VCALENDAR`;
 			Logger.warn(
 				`Failed to fetch task by UID ${uid}: ${
 					error instanceof Error ? error.message : String(error)
-				}`
+				}`,
 			);
 			return null;
 		}
@@ -812,7 +831,7 @@ END:VCALENDAR`;
 	async fetchTaskRawData(uid: string): Promise<string | null> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
-				"Client not connected. Call connect() first."
+				"Client not connected. Call connect() first.",
 			);
 		}
 
@@ -848,7 +867,7 @@ END:VCALENDAR`;
 			Logger.warn(
 				`Failed to fetch raw VTODO data for UID ${uid}: ${
 					error instanceof Error ? error.message : String(error)
-				}`
+				}`,
 			);
 			return null;
 		}
@@ -962,7 +981,7 @@ END:VCALENDAR`;
 			// Note: We treat timezone-specified times as local time for simplicity.
 			// A more complete implementation would use the VTIMEZONE to convert.
 			return new Date(
-				`${year}-${month}-${day}T${hour}:${minute}:${second}`
+				`${year}-${month}-${day}T${hour}:${minute}:${second}`,
 			);
 		}
 
@@ -976,7 +995,7 @@ END:VCALENDAR`;
 	private parseISODateTime(isoStr: string): string {
 		// Convert YYYYMMDDTHHMMSSZ to YYYY-MM-DDTHH:MM:SSZ
 		const match = isoStr.match(
-			/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/
+			/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/,
 		);
 		if (!match) {
 			return new Date().toISOString();

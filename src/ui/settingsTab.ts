@@ -3,7 +3,13 @@
  * Implements User Story 4 (Configure CalDAV Connection) and User Story 5 (Configure Auto-Sync)
  */
 
-import { App, PluginSettingTab, Setting, Notice } from "obsidian";
+import {
+	App,
+	PluginSettingTab,
+	Setting,
+	Notice,
+	SecretComponent,
+} from "obsidian";
 import CalDAVTaskSyncPlugin from "../main";
 import { CalDAVClient } from "../caldav/client";
 import { CalDAVAuthError, CalDAVNetworkError } from "../caldav/errors";
@@ -37,17 +43,17 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 	private addConnectionSection(containerEl: HTMLElement): void {
 		new Setting(containerEl).setName("Connection").setHeading();
 
-		// Warning about credential storage
-		const warningEl = containerEl.createDiv({ cls: "callout" });
-		warningEl.createEl("strong", { text: "⚠️ security notice" });
-		warningEl.createEl("p", {
-			text: "Credentials are stored locally in your vault. Ensure your vault is encrypted and secured. Consider using app-specific passwords if your caldav provider supports them.",
+		// Info about secure credential storage
+		const infoEl = containerEl.createDiv({ cls: "callout" });
+		infoEl.createEl("strong", { text: "Secure storage" });
+		infoEl.createEl("p", {
+			text: "Your CalDAV password is stored securely in the system keychain using Obsidian's secret storage API for additional security. consider using app-specific passwords if your CalDAV provider supports them.",
 		});
 
 		// Server URL (T015)
 		new Setting(containerEl)
 			.setName("Server URL")
-			.setDesc("CaldDav server URL (must start with https://)")
+			.setDesc("calDAV server URL (must start with https://)")
 			.addText((text) =>
 				text
 					.setPlaceholder("https://caldav.example.com")
@@ -55,7 +61,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.serverUrl = value;
 						await this.plugin.saveSettings();
-					})
+					}),
 			);
 
 		// Username (T016)
@@ -69,28 +75,27 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.username = value;
 						await this.plugin.saveSettings();
-					})
+					}),
 			);
 
-		// Password (T017)
+		// Password (T017) - Using SecretStorage API for secure storage
 		new Setting(containerEl)
 			.setName("Password")
-			.setDesc("Your CalDav password or app-specific token")
-			.addText((text) => {
-				text.inputEl.type = "password";
-				text.setPlaceholder("Enter password")
+			.setDesc("Select a password from SecretStorage")
+			.addComponent((el) =>
+				new SecretComponent(this.app, el)
 					.setValue(this.plugin.settings.password)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.plugin.settings.password = value;
-						await this.plugin.saveSettings();
-					});
-			});
+						this.plugin.saveSettings();
+					}),
+			);
 
 		// Calendar Path (T018)
 		new Setting(containerEl)
 			.setName("Calendar path")
 			.setDesc(
-				"Path to your tasks calendar (e.g., /dav/calendars/user/tasks/)"
+				"Path to your tasks calendar (e.g., /dav/calendars/user/tasks/)",
 			)
 			.addText((text) =>
 				text
@@ -99,20 +104,20 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.calendarPath = value;
 						await this.plugin.saveSettings();
-					})
+					}),
 			);
 
 		// Test Connection Button (T020-T022)
 		new Setting(containerEl)
 			.setName("Test connection")
-			.setDesc("Verify your CalDav connection settings")
+			.setDesc("verify your CalDAV connection settings")
 			.addButton((button) =>
 				button
 					.setButtonText("Test connection")
 					.setCta()
 					.onClick(async () => {
 						await this.testConnection();
-					})
+					}),
 			);
 	}
 
@@ -142,7 +147,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 								this.plugin.syncScheduler.stop();
 							}
 						}
-					})
+					}),
 			);
 
 		// Sync Interval (T025)
@@ -166,17 +171,17 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 							}
 						} else {
 							new Notice(
-								"Sync interval must be at least 10 seconds"
+								"Sync interval must be at least 10 seconds",
 							);
 						}
-					})
+					}),
 			);
 
 		// Debug Logging Toggle (T017-T018, 002-sync-polish)
 		new Setting(containerEl)
 			.setName("Enable debug logging")
 			.setDesc(
-				"Show detailed sync logs in browser console (open with F12). Disable for minimal output."
+				"show detailed sync logs in browser console (open with F12), disable for minimal output",
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -185,7 +190,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 						this.plugin.settings.enableDebugLogging = value;
 						setDebugMode(value);
 						await this.plugin.saveSettings();
-					})
+					}),
 			);
 	}
 
@@ -207,7 +212,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Excluded folders")
 			.setDesc(
-				"Comma-separated list of folders to exclude (must end with /). Example: Archive/, Templates/"
+				"comma-separated list of folders to exclude (must end with /), example: archive/, templates/",
 			)
 			.addText((text) =>
 				text
@@ -222,13 +227,13 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 						// Validate: all folders must end with '/'
 						const invalidFolders = folders.filter(
-							(f) => !f.endsWith("/")
+							(f) => !f.endsWith("/"),
 						);
 						if (invalidFolders.length > 0) {
 							new Notice(
 								`Invalid folder paths (must end with /): ${invalidFolders.join(
-									", "
-								)}`
+									", ",
+								)}`,
 							);
 							return;
 						}
@@ -238,14 +243,14 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 						// Update filter in sync engine
 						this.updateSyncFilter();
-					})
+					}),
 			);
 
 		// Excluded Tags (T063 with validation T070)
 		new Setting(containerEl)
 			.setName("Excluded tags")
 			.setDesc(
-				"Comma-separated list of tags to exclude (must start with #). Example: #private, #local-only"
+				"Comma-separated list of tags to exclude (must start with #). Example: #private, #local-only",
 			)
 			.addText((text) =>
 				text
@@ -260,13 +265,13 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 						// Validate: all tags must start with '#'
 						const invalidTags = tags.filter(
-							(t) => !t.startsWith("#")
+							(t) => !t.startsWith("#"),
 						);
 						if (invalidTags.length > 0) {
 							new Notice(
 								`Invalid tags (must start with #): ${invalidTags.join(
-									", "
-								)}`
+									", ",
+								)}`,
 							);
 							return;
 						}
@@ -276,14 +281,14 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 						// Update filter in sync engine
 						this.updateSyncFilter();
-					})
+					}),
 			);
 
 		// Completed Task Age Threshold (T064)
 		new Setting(containerEl)
 			.setName("Completed task age")
 			.setDesc(
-				"Exclude completed tasks older than this many days (0 = sync all completed tasks)"
+				"Exclude completed tasks older than this many days (0 = sync all completed tasks)",
 			)
 			.addText((text) =>
 				text
@@ -293,7 +298,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 						const days = parseInt(value);
 						if (isNaN(days) || days < 0) {
 							new Notice(
-								"Completed task age must be 0 or greater"
+								"Completed task age must be 0 or greater",
 							);
 							return;
 						}
@@ -303,7 +308,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 						// Update filter in sync engine
 						this.updateSyncFilter();
-					})
+					}),
 			);
 	}
 
@@ -332,7 +337,10 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 			return;
 		}
 
-		if (!this.plugin.settings.username || !this.plugin.settings.password) {
+		const password = this.app.secretStorage.getSecret(
+			this.plugin.settings.password,
+		);
+		if (!this.plugin.settings.username || !password) {
 			new Notice("Please enter username and password");
 			return;
 		}
@@ -340,7 +348,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 		const notice = new Notice("Testing connection...", 0);
 
 		try {
-			const client = new CalDAVClient(this.plugin.settings);
+			const client = new CalDAVClient(this.app, this.plugin.settings);
 			const success = await client.testConnection();
 
 			notice.hide();
@@ -355,11 +363,11 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 			if (error instanceof CalDAVAuthError) {
 				new Notice(
-					"✗ authentication failed. Please check your username and password."
+					"✗ authentication failed. Please check your username and password.",
 				);
 			} else if (error instanceof CalDAVNetworkError) {
 				new Notice(
-					"✗ network error. Please check your server URL and internet connection."
+					"✗ network error. Please check your server URL and internet connection.",
 				);
 			} else if (error instanceof Error) {
 				new Notice(`✗ connection failed: ${error.message}`);

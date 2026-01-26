@@ -30,9 +30,10 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 
 		// Initialize sync engine (Phase 5 - US1: T041)
 		this.syncEngine = new SyncEngine(
+			this.app,
 			this.app.vault,
 			this.settings,
-			async () => await this.savePluginData()
+			async () => await this.savePluginData(),
 		);
 
 		// Add settings tab (Phase 3 - US4: T023)
@@ -43,7 +44,7 @@ export default class CalDAVTaskSyncPlugin extends Plugin {
 		this.syncScheduler = new SyncScheduler(
 			this.app,
 			this.settings,
-			async (isAutoSync: boolean) => await this.performSync(isAutoSync)
+			async (isAutoSync: boolean) => await this.performSync(isAutoSync),
 		);
 
 		// Start automatic sync if enabled

@@ -4,8 +4,6 @@
 	"version": "0.0.1",
 	"minAppVersion": "0.15.0",
 	"description": "Bidirectionally sync Obsidian tasks with CalDAV servers (Nextcloud, Radicale, Baikal). Supports automatic background sync with configurable intervals and filtering.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"author": "rocko",
 	"isDesktopOnly": false
 }

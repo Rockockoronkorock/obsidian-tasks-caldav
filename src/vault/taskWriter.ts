@@ -3,8 +3,34 @@
  * Based on tasks.md T036 specification
  */
 
-import { Vault, TFile } from "obsidian";
+import { Vault, TFile, App } from "obsidian";
 import { Task, TaskStatus } from "../types";
+
+/**
+ * Interface for the Obsidian Tasks Plugin API v1
+ */
+interface TasksPluginAPI {
+	executeToggleTaskDoneCommand(line: string, path: string): string;
+	createTaskLineModal(): Promise<string>;
+	editTaskLineModal(taskLine: string): Promise<string>;
+}
+
+/**
+ * Check if the Obsidian Tasks Plugin is available and return its API
+ * @param app The Obsidian app instance
+ * @returns The Tasks Plugin API or null if not available
+ */
+function getTasksPluginAPI(app: App): TasksPluginAPI | null {
+	try {
+		const plugin = (app as any).plugins?.plugins?.['obsidian-tasks-plugin'];
+		if (plugin?.apiV1) {
+			return plugin.apiV1 as TasksPluginAPI;
+		}
+	} catch (error) {
+		console.warn('Failed to access Tasks Plugin API:', error);
+	}
+	return null;
+}
 
 /**
  * Update a task line in the vault
@@ -92,6 +118,12 @@ function formatDateForTasks(date: Date): string {
 /**
  * Update a task in the vault with new properties from CalDAV
  * Implements T055: Obsidian task update for CalDAV-to-Obsidian sync
+ *
+ * When the Obsidian Tasks Plugin is available, uses its API for status toggles
+ * to properly handle recurrence patterns and user preferences. Falls back to
+ * direct editing when the plugin is unavailable or when updating other properties.
+ *
+ * @param app The Obsidian app instance
  * @param vault The Obsidian vault instance
  * @param task The existing task in the vault
  * @param newDescription Updated description
@@ -99,13 +131,46 @@ function formatDateForTasks(date: Date): string {
  * @param newStatus Updated status
  */
 export async function updateTaskInVault(
+	app: App,
 	vault: Vault,
 	task: Task,
 	newDescription: string,
 	newDueDate: Date | null,
 	newStatus: TaskStatus
 ): Promise<void> {
-	// Build new task line with updated properties
+	// Check if only status is changing (description and due date unchanged)
+	const descriptionChanged = task.description !== newDescription;
+	const dueDateChanged = !datesEqual(task.dueDate, newDueDate);
+	const statusChanged = task.status !== newStatus;
+
+	// Try to use Tasks Plugin API if only status is changing
+	if (statusChanged && !descriptionChanged && !dueDateChanged) {
+		const tasksAPI = getTasksPluginAPI(app);
+		if (tasksAPI) {
+			try {
+				// Use Tasks Plugin API to toggle status (handles recurrence properly)
+				const updatedLine = tasksAPI.executeToggleTaskDoneCommand(
+					task.rawLine,
+					task.filePath
+				);
+
+				// Update the task line in the vault
+				await updateTaskLine(vault, task, updatedLine);
+
+				// Update task object with new values
+				task.status = newStatus;
+				task.rawLine = updatedLine;
+
+				console.debug('Updated task status using Tasks Plugin API');
+				return;
+			} catch (error) {
+				console.warn('Failed to use Tasks Plugin API, falling back to direct edit:', error);
+				// Fall through to direct editing
+			}
+		}
+	}
+
+	// Direct editing: build new task line with updated properties
 	const newLine = buildTaskLine(
 		newDescription,
 		newStatus,
@@ -122,4 +187,19 @@ export async function updateTaskInVault(
 	task.dueDate = newDueDate;
 	task.status = newStatus;
 	task.rawLine = newLine;
+}
+
+/**
+ * Helper function to compare two dates (null-safe)
+ * @param date1 First date or null
+ * @param date2 Second date or null
+ * @returns true if dates are equal (including both null)
+ */
+function datesEqual(date1: Date | null, date2: Date | null): boolean {
+	if (date1 === null && date2 === null) return true;
+	if (date1 === null || date2 === null) return false;
+	// Compare date-only (ignore time)
+	return date1.getUTCFullYear() === date2.getUTCFullYear() &&
+		date1.getUTCMonth() === date2.getUTCMonth() &&
+		date1.getUTCDate() === date2.getUTCDate();
 }

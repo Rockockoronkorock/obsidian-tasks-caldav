@@ -1,3 +1,0 @@
--   Use Obsidian Secret API to manage Secrets
--   Check Developer Policies
--   TESTS, TESTS, TESTS
