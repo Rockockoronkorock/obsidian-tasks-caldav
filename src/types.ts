@@ -89,6 +89,8 @@ export interface CalDAVConfiguration {
 	completedTaskAgeDays: number;
 	/** Enable debug logging in browser console (default: false) */
 	enableDebugLogging: boolean;
+	/** Sync only tasks with due dates (default: false) */
+	syncOnlyTasksWithDueDate: boolean;
 }
 
 /**

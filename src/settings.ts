@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS: CalDAVConfiguration = {
 	excludedFolders: [],
 	excludedTags: [],
 	completedTaskAgeDays: 30,
+	syncOnlyTasksWithDueDate: false,
 
 	// Logging settings
 	enableDebugLogging: false,

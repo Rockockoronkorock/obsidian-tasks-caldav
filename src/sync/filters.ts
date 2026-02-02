@@ -1,9 +1,27 @@
 /**
  * Sync filter implementation for task filtering
  * Based on tasks.md T039 specification and data-model.md
+ * Extended for 004-sync-due-date-only: T015-T018, T026-T027
  */
 
-import { Task, TaskStatus, CalDAVConfiguration, CalDAVTask, VTODOStatus } from "../types";
+import { Task, TaskStatus, CalDAVConfiguration, CalDAVTask, VTODOStatus, SyncMapping } from "../types";
+
+/**
+ * Helper function to check if a task has been previously synced (T015)
+ * @param task The task to check
+ * @param mappings Map of existing sync mappings (blockId -> SyncMapping)
+ * @returns true if task was previously synced, false otherwise
+ */
+function hasSyncMapping(
+	task: Task,
+	mappings: Map<string, SyncMapping>
+): boolean {
+	// Treat empty blockId as never synced (T027)
+	if (!task.blockId || task.blockId === "") {
+		return false;
+	}
+	return mappings.has(task.blockId);
+}
 
 /**
  * Sync filter class for evaluating which tasks should be synced
@@ -24,13 +42,21 @@ export class SyncFilter {
 	}
 
 	/**
-	 * Determine if a task should be synced based on filters
+	 * Determine if a task should be synced based on filters (T016-T017, T026)
 	 * @param task The task to evaluate
+	 * @param config CalDAV configuration with filter settings
+	 * @param mappings Map of existing sync mappings (for due date filter exception)
 	 * @returns true if task should be synced, false otherwise
 	 */
-	shouldSync(task: Task): boolean {
-		// For now, return true (placeholder implementation)
-		// Full implementation will be added in Phase 8 (US6)
+	shouldSync(task: Task, config: CalDAVConfiguration, mappings: Map<string, SyncMapping>): boolean {
+		// Due date filter (T017, T026 - if enabled)
+		if (config.syncOnlyTasksWithDueDate) {
+			// If task has no due date AND was never synced → skip (T017)
+			// Exception: if task was previously synced, continue to sync it (T026)
+			if (!task.dueDate && !hasSyncMapping(task, mappings)) {
+				return false;
+			}
+		}
 
 		// Check folder exclusion
 		if (this.matchesFolderExclusion(task.filePath)) {

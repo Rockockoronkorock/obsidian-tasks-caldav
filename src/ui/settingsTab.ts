@@ -196,6 +196,7 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 
 	/**
 	 * Add filter settings section (US6: T061-T064, T070)
+	 * Extended for 004-sync-due-date-only: T006-T008
 	 */
 	private addFilterSection(containerEl: HTMLElement): void {
 		new Setting(containerEl).setName("Filters").setHeading();
@@ -207,6 +208,24 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 		infoEl.createEl("p", {
 			text: "Tasks that match any exclusion filter will not be synced to caldav.",
 		});
+
+		// Sync Only Tasks with Due Dates (T006-T008, 004-sync-due-date-only)
+		new Setting(containerEl)
+			.setName("Sync only tasks with due dates")
+			.setDesc(
+				"When enabled, only tasks with due dates will be synced. Previously synced tasks will continue to sync even if their due date is removed.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.syncOnlyTasksWithDueDate)
+					.onChange(async (value) => {
+						this.plugin.settings.syncOnlyTasksWithDueDate = value;
+						await this.plugin.saveSettings();
+
+						// Update filter in sync engine
+						this.updateSyncFilter();
+					}),
+			);
 
 		// Excluded Folders (T062 with validation T070)
 		new Setting(containerEl)

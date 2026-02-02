@@ -12,7 +12,7 @@ import { scanVaultForTasks } from "../vault/scanner";
 import { updateTaskLine } from "../vault/taskWriter";
 import { generateTaskBlockId, embedBlockId } from "../vault/blockRefManager";
 import { taskToVTODO } from "../caldav/vtodo";
-import { hashTaskContent, getMappingByBlockId, setMapping } from "./mapping";
+import { hashTaskContent, getMappingByBlockId, setMapping, getAllMappings } from "./mapping";
 import {
 	showSyncStart,
 	showSyncSuccess,
@@ -197,9 +197,10 @@ export class SyncEngine {
 		// Scan vault for tasks
 		const allTasks = await scanVaultForTasks(this.vault);
 
-		// Apply filters
+		// Apply filters (T018 - pass config and mappings for due date filter)
+		const mappings = getAllMappings();
 		const obsidianTasks = allTasks.filter((task) =>
-			this.filter.shouldSync(task)
+			this.filter.shouldSync(task, this.config, mappings)
 		);
 
 		// Show filter statistics only for manual sync (T016)
