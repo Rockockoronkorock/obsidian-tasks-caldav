@@ -2,6 +2,10 @@
 
 Bidirectionally sync your Obsidian tasks with CalDAV servers, enabling seamless integration with popular calendar applications like Nextcloud Tasks, Radicale, and Baikal.
 
+> **⚠️ Early Development Phase**
+> This plugin is in early development and has only been tested with a few CalDAV providers. Use at your own risk and always backup your vault before syncing.
+> **Not available in Community Plugins yet** - install via BRAT (see installation instructions below).
+
 ## Features
 
 - **Bidirectional Sync**: Keep tasks in sync between Obsidian and your CalDAV server
@@ -16,8 +20,17 @@ Bidirectionally sync your Obsidian tasks with CalDAV servers, enabling seamless 
 
 ### 1. Install the Plugin
 
-- Download and enable the plugin from Obsidian's Community Plugins
-- Or manually install by copying `main.js`, `manifest.json`, and `styles.css` to your vault's `.obsidian/plugins/obsidian-tasks-caldev/` folder
+**Via BRAT (Recommended)**
+
+1. Install the [BRAT plugin](https://github.com/TfTHacker/obsidian42-brat) if you haven't already
+2. Open Command Palette and run "BRAT: Add a beta plugin for testing"
+3. Enter this repository URL: `https://github.com/yourusername/obsidian-tasks-caldev`
+4. Enable the plugin in Settings → Community Plugins
+
+**Manual Installation**
+
+- Copy `main.js`, `manifest.json`, and `styles.css` to your vault's `.obsidian/plugins/obsidian-tasks-caldev/` folder
+- Enable the plugin in Settings → Community Plugins
 
 ### 2. Configure CalDAV Server
 
@@ -63,11 +76,13 @@ Tasks are synced bidirectionally:
 
 ## Supported CalDAV Servers
 
-Tested and compatible with:
+**Limited Testing**: This plugin has only been tested with a few CalDAV providers. Compatibility may vary.
+
+Tested with:
 - **Nextcloud** (with Tasks app)
 - **Radicale**
-- **Baikal**
-- Any RFC 4791 compliant CalDAV server
+
+Should work with any RFC 4791 compliant CalDAV server, but compatibility is not guaranteed.
 
 ## Troubleshooting
 
