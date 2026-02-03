@@ -244,9 +244,7 @@ export class CalDAVClient {
 	 * @param completedTaskAgeThreshold Optional date threshold to exclude old completed tasks at server level
 	 * @returns Array of CalDAV tasks
 	 */
-	async fetchAllTasks(
-		completedTaskAgeThreshold?: Date,
-	): Promise<CalDAVTask[]> {
+	async fetchAllTasks(): Promise<CalDAVTask[]> {
 		if (!this.client || !this.calendar) {
 			throw new CalDAVError(
 				"Client not connected. Call connect() first.",
@@ -257,8 +255,12 @@ export class CalDAVClient {
 			try {
 				Logger.debug("Fetching tasks from CalDAV server...");
 
-				// Create filter for VTODO items (tasks) instead of default VEVENT (events)
-				let vtodoFilter: CalDAVFilter = {
+				// Filter for VTODO items (tasks) instead of default VEVENT (events).
+				// Age filtering of completed tasks is done client-side:
+				// a server-side prop-filter on LAST-MODIFIED silently drops tasks
+				// on servers that don't populate the property (it is optional per
+				// RFC 5545).
+				const vtodoFilter: CalDAVFilter = {
 					"comp-filter": {
 						_attributes: { name: "VCALENDAR" },
 						"comp-filter": {
@@ -266,33 +268,6 @@ export class CalDAVClient {
 						},
 					},
 				};
-
-				// If age threshold is provided, add time-range filter to exclude old completed tasks
-				if (
-					completedTaskAgeThreshold &&
-					completedTaskAgeThreshold.getTime() !== 0
-				) {
-					const thresholdStr = this.formatDateTimeForCalDAV(
-						completedTaskAgeThreshold,
-					);
-
-					const compFilter =
-						vtodoFilter["comp-filter"]["comp-filter"];
-					if (compFilter) {
-						compFilter["prop-filter"] = {
-							_attributes: { name: "LAST-MODIFIED" },
-							"time-range": {
-								_attributes: {
-									start: thresholdStr,
-								},
-							},
-						};
-					}
-
-					Logger.debug(
-						`Applying server-side filter: excluding tasks older than ${completedTaskAgeThreshold.toISOString()}`,
-					);
-				}
 
 				// Fetch calendar objects with VTODO filter
 				const calendarObjects = await this.client!.fetchCalendarObjects(
@@ -896,7 +871,7 @@ END:VCALENDAR`;
 		// - DUE:YYYYMMDDTHHMMSSZ (UTC datetime)
 		// - DUE:YYYYMMDDTHHMMSS (floating datetime)
 		// - DUE;TZID=...:YYYYMMDDTHHMMSS (datetime with timezone)
-		const dueMatch = data.match(/DUE(?:;[^:]+)?:(\d{8})(?:T(\d{6}))?Z?/);
+		const dueMatch = data.match(/^DUE(?:;[^:]+)?:(\d{8})(?:T(\d{6}))?Z?/m);
 		let due: Date | null = null;
 		if (dueMatch && dueMatch[1]) {
 			const dateStr = dueMatch[1];
@@ -912,12 +887,13 @@ END:VCALENDAR`;
 				? VTODOStatus.Completed
 				: VTODOStatus.NeedsAction;
 
-		// Extract LAST-MODIFIED
+		// Extract LAST-MODIFIED (optional per RFC 5545; fall back to epoch so
+		// that a missing value doesn't masquerade as "just now")
 		const lastModMatch = data.match(/LAST-MODIFIED:([^\r\n]+)/);
 		const lastModified =
 			lastModMatch && lastModMatch[1]
 				? new Date(this.parseISODateTime(lastModMatch[1]))
-				: new Date();
+				: new Date(0);
 
 		return {
 			uid,
@@ -938,19 +914,6 @@ END:VCALENDAR`;
 		const month = String(date.getUTCMonth() + 1).padStart(2, "0");
 		const day = String(date.getUTCDate()).padStart(2, "0");
 		return `${year}${month}${day}`;
-	}
-
-	/**
-	 * Format DateTime for CalDAV filters (YYYYMMDDTHHMMSSZ)
-	 */
-	private formatDateTimeForCalDAV(date: Date): string {
-		const year = date.getUTCFullYear();
-		const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-		const day = String(date.getUTCDate()).padStart(2, "0");
-		const hour = String(date.getUTCHours()).padStart(2, "0");
-		const minute = String(date.getUTCMinutes()).padStart(2, "0");
-		const second = String(date.getUTCSeconds()).padStart(2, "0");
-		return `${year}${month}${day}T${hour}${minute}${second}Z`;
 	}
 
 	/**
@@ -978,10 +941,12 @@ END:VCALENDAR`;
 			const hour = timeStr.substring(0, 2);
 			const minute = timeStr.substring(2, 4);
 			const second = timeStr.substring(4, 6);
-			// Note: We treat timezone-specified times as local time for simplicity.
-			// A more complete implementation would use the VTIMEZONE to convert.
+			// Treat all times as UTC. This is correct for the common Z-suffixed
+			// format (DUE:YYYYMMDDTHHMMSSZ). For TZID-parameterised times the
+			// date portion is still correct; full VTIMEZONE conversion is out of
+			// scope for date-only sync.
 			return new Date(
-				`${year}-${month}-${day}T${hour}:${minute}:${second}`,
+				`${year}-${month}-${day}T${hour}:${minute}:${second}Z`,
 			);
 		}
 
@@ -998,7 +963,7 @@ END:VCALENDAR`;
 			/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/,
 		);
 		if (!match) {
-			return new Date().toISOString();
+			return new Date(0).toISOString();
 		}
 		const [, year, month, day, hour, minute, second] = match;
 		return `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;

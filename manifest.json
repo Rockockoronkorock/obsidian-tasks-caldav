@@ -1,9 +1,9 @@
 {
 	"id": "obsidian-tasks-caldev",
 	"name": "CalDAV Task Sync",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"minAppVersion": "0.15.0",
-	"description": "Bidirectionally sync Obsidian tasks with CalDAV servers (Nextcloud, Radicale, Baikal). Supports automatic background sync with configurable intervals and filtering.",
+	"description": "Bidirectionally sync Obsidian tasks with CalDAV servers. Supports automatic background sync with configurable intervals and filtering.",
 	"author": "rocko",
 	"isDesktopOnly": false
 }

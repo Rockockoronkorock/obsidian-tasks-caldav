@@ -173,23 +173,24 @@ export class SyncEngine {
 		caldavTasks: Map<string, CalDAVTask>;
 		obsidianTasks: Task[];
 	}> {
-		// Calculate age threshold for completed tasks
-		const ageThreshold = this.calculateAgeThreshold();
-
-		// Fetch from CalDAV with server-side filtering
-		const caldavTaskArray = await this.client.fetchAllTasks(ageThreshold);
+		// Fetch all VTODOs; age filtering is applied client-side after fetch
+		const caldavTaskArray = await this.client.fetchAllTasks();
 		Logger.info(`Fetched ${caldavTaskArray.length} tasks from CalDAV server`);
 
-		if (ageThreshold) {
+		// Client-side age filter for completed tasks
+		const filteredCalDAVTasks = caldavTaskArray.filter((task) =>
+			this.filter.shouldSyncCalDAVTask(task)
+		);
+		if (filteredCalDAVTasks.length < caldavTaskArray.length) {
 			Logger.debug(
-				`Server-side filtering active: excluding tasks older than ${ageThreshold.toISOString()}`
+				`Age filter excluded ${caldavTaskArray.length - filteredCalDAVTasks.length} old completed tasks`
 			);
 		}
 
 		// Performance optimization: Index CalDAV tasks by UID for O(1) lookups
 		// This converts O(n²) complexity to O(n) during sync processing
 		const caldavTasks = new Map<string, CalDAVTask>();
-		for (const task of caldavTaskArray) {
+		for (const task of filteredCalDAVTasks) {
 			caldavTasks.set(task.uid, task);
 		}
 		Logger.debug(`Indexed ${caldavTasks.size} CalDAV tasks by UID`);
@@ -209,21 +210,6 @@ export class SyncEngine {
 		}
 
 		return { caldavTasks, obsidianTasks };
-	}
-
-	/**
-	 * Calculate age threshold for completed tasks
-	 */
-	private calculateAgeThreshold(): Date | undefined {
-		if (this.config.completedTaskAgeDays <= 0) {
-			return undefined;
-		}
-
-		const threshold = new Date();
-		threshold.setDate(
-			threshold.getDate() - this.config.completedTaskAgeDays
-		);
-		return threshold;
 	}
 
 	/**
@@ -675,7 +661,10 @@ export class SyncEngine {
 	}
 
 	/**
-	 * Detect if a task has changed on CalDAV server since last sync
+	 * Detect if a task has changed on CalDAV server since last sync.
+	 * Uses ETag comparison: ETags are mandatory per WebDAV (RFC 4918) and
+	 * change on every server-side write, unlike the iCalendar LAST-MODIFIED
+	 * property which is optional (RFC 5545) and unreliable across servers.
 	 * Implements T054: Change detection for CalDAV
 	 * @param caldavTask The current task from CalDAV server
 	 * @param mapping The existing sync mapping
@@ -685,25 +674,12 @@ export class SyncEngine {
 		caldavTask: CalDAVTask,
 		mapping: SyncMapping
 	): boolean {
-		// Compare lastModified timestamps
-		// If CalDAV's lastModified is newer than what we have stored, it changed
-		// NOTE: Normalize to seconds precision because CalDAV servers strip milliseconds
-		const caldavModified = Math.floor(
-			caldavTask.lastModified.getTime() / 1000
-		);
-		const lastKnown = Math.floor(
-			mapping.lastKnownCalDAVModified.getTime() / 1000
-		);
-		const hasChanged = caldavModified > lastKnown;
+		const hasChanged = caldavTask.etag !== mapping.caldavEtag;
 
 		if (hasChanged) {
 			Logger.debug(`CalDAV task changed: ${caldavTask.uid}`);
-			Logger.debug(
-				`  CalDAV modified: ${caldavTask.lastModified.toISOString()}`
-			);
-			Logger.debug(
-				`  Last known: ${mapping.lastKnownCalDAVModified.toISOString()}`
-			);
+			Logger.debug(`  Current etag: ${caldavTask.etag}`);
+			Logger.debug(`  Stored etag:  ${mapping.caldavEtag}`);
 		}
 
 		return hasChanged;

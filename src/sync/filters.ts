@@ -147,11 +147,13 @@ export class SyncFilter {
 			return true;
 		}
 
-		// Use lastModified as proxy for completion date
-		// This is the best we can do since CalDAV doesn't always have a separate completion date
-		const completionDate = caldavTask.lastModified;
+		// Use lastModified as proxy for completion date.
+		// Epoch (0) means LAST-MODIFIED was absent from the VTODO — treat as
+		// unknown and let the task through rather than silently dropping it.
+		if (caldavTask.lastModified.getTime() === 0) {
+			return true;
+		}
 
-		// Check if completion date is older than threshold
-		return completionDate >= this.completedTaskAgeThreshold;
+		return caldavTask.lastModified >= this.completedTaskAgeThreshold;
 	}
 }

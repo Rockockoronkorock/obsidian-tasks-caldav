@@ -22,7 +22,9 @@ export class Logger {
 	 * Log an informational message
 	 */
 	static info(message: string, ...args: unknown[]): void {
-		console.warn(`[CalDAV Sync] ${message}`, ...args);
+		if (DEBUG) {
+			console.debug(`[CalDAV Sync] ${message}`, ...args);
+		}
 	}
 
 	/**
@@ -74,14 +76,14 @@ export class Logger {
 	}
 
 	/**
-	 * Log sync start (INFO level - always shown)
+	 * Log sync start
 	 */
 	static syncStart(): void {
 		Logger.info("Sync started...");
 	}
 
 	/**
-	 * Log sync completion (INFO level - always shown)
+	 * Log sync completion
 	 */
 	static syncComplete(): void {
 		Logger.info("Sync completed.");

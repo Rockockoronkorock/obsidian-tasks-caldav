@@ -99,8 +99,9 @@ export function parseVTODOString(vtodoData: string): {
 	const summaryMatch = vtodoData.match(/SUMMARY:([^\r\n]+)/);
 	const summary = summaryMatch?.[1] ?? "";
 
-	// Extract DUE date
-	const dueMatch = vtodoData.match(/DUE(?:;VALUE=DATE)?:(\d{8})/);
+	// Extract DUE date — match date-only and datetime formats, anchored to
+	// line start so we don't false-match inside DESCRIPTION or other values.
+	const dueMatch = vtodoData.match(/^DUE(?:;[^:]+)?:(\d{8})(?:T\d{6})?Z?/m);
 	const due = dueMatch && dueMatch[1] ? parseCalDAVDate(dueMatch[1]) : null;
 
 	// Extract STATUS
@@ -108,11 +109,12 @@ export function parseVTODOString(vtodoData: string): {
 	const statusStr = statusMatch?.[1] ?? "NEEDS-ACTION";
 	const status = statusStr === "COMPLETED" ? VTODOStatus.Completed : VTODOStatus.NeedsAction;
 
-	// Extract LAST-MODIFIED
+	// Extract LAST-MODIFIED (optional per RFC 5545; fall back to epoch so
+	// that a missing value doesn't masquerade as "just now")
 	const lastModMatch = vtodoData.match(/LAST-MODIFIED:([^\r\n]+)/);
 	const lastModified = lastModMatch && lastModMatch[1]
 		? parseISODateTime(lastModMatch[1])
-		: new Date();
+		: new Date(0);
 
 	return {
 		uid,
@@ -132,7 +134,7 @@ function parseISODateTime(isoStr: string): Date {
 	// Convert YYYYMMDDTHHMMSSZ to YYYY-MM-DDTHH:MM:SSZ
 	const match = isoStr.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/);
 	if (!match) {
-		return new Date();
+		return new Date(0);
 	}
 	const [, year, month, day, hour, minute, second] = match;
 	return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
@@ -219,20 +221,21 @@ export function updateVTODOProperties(
 	}
 
 	// 3. Handle DUE property (conditional)
+	// Anchored to line start (^…/m) so we don't match "DUE" inside a
+	// DESCRIPTION or other property value.
 	if (due) {
 		const dueString = formatDateForCalDAV(due);
 		const dueProperty = `DUE;VALUE=DATE:${dueString}`;
 
-		// Match both DUE: and DUE;VALUE=DATE: formats
-		if (updated.match(/DUE[;:][^\r\n]+/)) {
-			updated = updated.replace(/DUE[;:][^\r\n]+/, dueProperty);
+		if (updated.match(/^DUE[;:][^\r\n]+/m)) {
+			updated = updated.replace(/^DUE[;:][^\r\n]+/m, dueProperty);
 		} else {
 			// If DUE is missing, insert before END:VTODO
 			updated = updated.replace(/END:VTODO/, `${dueProperty}\r\nEND:VTODO`);
 		}
 	} else {
 		// Remove DUE property if new value is null
-		updated = updated.replace(/DUE[;:][^\r\n]+\r?\n?/, "");
+		updated = updated.replace(/^DUE[;:][^\r\n]+\r?\n?/m, "");
 	}
 
 	// 4. Update LAST-MODIFIED timestamp
@@ -311,8 +314,8 @@ function validateVTODOStructure(vtodo: string): void {
 		throw new Error(`Duplicate STATUS property (found ${statusMatches.length})`);
 	}
 
-	// Check for at most one DUE
-	const dueMatches = vtodo.match(/DUE[;:][^\r\n]+/g);
+	// Check for at most one DUE (anchored to line start to avoid matching inside values)
+	const dueMatches = vtodo.match(/^DUE[;:][^\r\n]+/gm);
 	if (dueMatches && dueMatches.length > 1) {
 		throw new Error(`Duplicate DUE property (found ${dueMatches.length})`);
 	}
