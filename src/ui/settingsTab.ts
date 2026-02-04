@@ -14,6 +14,7 @@ import CalDAVTaskSyncPlugin from "../main";
 import { CalDAVClient } from "../caldav/client";
 import { CalDAVAuthError, CalDAVNetworkError } from "../caldav/errors";
 import { setDebugMode } from "../sync/logger";
+import { HyperlinkSyncMode } from "../types";
 
 export class CalDAVSettingsTab extends PluginSettingTab {
 	plugin: CalDAVTaskSyncPlugin;
@@ -191,6 +192,22 @@ export class CalDAVSettingsTab extends PluginSettingTab {
 						setDebugMode(value);
 						await this.plugin.saveSettings();
 					}),
+			);
+
+		// Hyperlink Sync Mode (005-hyperlink-sync-config)
+		new Setting(containerEl)
+			.setName("Hyperlink handling")
+			.setDesc("How markdown hyperlinks [text](url) in task descriptions are handled when syncing to CalDAV")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption(HyperlinkSyncMode.Keep,  "Keep as-is")
+					.addOption(HyperlinkSyncMode.Move,  "Move to notes")
+					.addOption(HyperlinkSyncMode.Strip, "Strip hyperlinks")
+					.setValue(this.plugin.settings.hyperlinkSyncMode)
+					.onChange(async (value) => {
+						this.plugin.settings.hyperlinkSyncMode = value as HyperlinkSyncMode;
+						await this.plugin.saveSettings();
+					})
 			);
 	}
 

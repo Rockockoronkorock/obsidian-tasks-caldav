@@ -66,6 +66,19 @@ export interface SyncMapping {
 }
 
 /**
+ * Controls how markdown hyperlinks [text](url) in task descriptions
+ * are handled when syncing to CalDAV.
+ */
+export enum HyperlinkSyncMode {
+	/** Hyperlinks remain in SUMMARY as raw markdown */
+	Keep  = "keep",
+	/** URLs extracted to DESCRIPTION; display text stays in SUMMARY */
+	Move  = "move",
+	/** URLs removed entirely; only display text remains in SUMMARY */
+	Strip = "strip",
+}
+
+/**
  * User-provided settings for connecting to the CalDAV server
  * Note: Password is stored separately using Obsidian's SecretStorage API for security
  */
@@ -91,6 +104,8 @@ export interface CalDAVConfiguration {
 	enableDebugLogging: boolean;
 	/** Sync only tasks with due dates (default: false) */
 	syncOnlyTasksWithDueDate: boolean;
+	/** How markdown hyperlinks in task descriptions are handled during sync (default: "keep") */
+	hyperlinkSyncMode: HyperlinkSyncMode;
 }
 
 /**

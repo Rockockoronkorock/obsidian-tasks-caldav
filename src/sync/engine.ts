@@ -5,7 +5,7 @@
  */
 
 import { Vault, Notice, App } from "obsidian";
-import { Task, CalDAVConfiguration, SyncMapping, CalDAVTask } from "../types";
+import { Task, CalDAVConfiguration, SyncMapping, CalDAVTask, HyperlinkSyncMode } from "../types";
 import { CalDAVClient } from "../caldav/client";
 import { SyncFilter } from "./filters";
 import { scanVaultForTasks } from "../vault/scanner";
@@ -27,6 +27,7 @@ import {
 } from "./conflictResolver";
 import { Logger } from "./logger";
 import { buildObsidianURI, buildDescriptionWithURI } from "../obsidian/uriBuilder";
+import { processDescription } from "./hyperlinkProcessor";
 
 /**
  * Sync statistics for tracking sync progress
@@ -545,6 +546,9 @@ export class SyncEngine {
 		// Convert task to VTODO format (T037)
 		const vtodoData = taskToVTODO(task);
 
+		// Process hyperlinks according to setting (005-hyperlink-sync-config)
+		const processed = processDescription(vtodoData.summary, this.config.hyperlinkSyncMode);
+
 		// Generate Obsidian URI with error handling (T013-T018)
 		// This provides a clickable deep link in CalDAV clients to open Obsidian
 		// directly to the task location within the source note.
@@ -559,16 +563,21 @@ export class SyncEngine {
 			} else {
 				// Generate URI and format DESCRIPTION (T016)
 				const uri = buildObsidianURI(vaultName, task.filePath, task.blockId);
-				description = buildDescriptionWithURI(uri);
+				description = buildDescriptionWithURI(uri, processed.extractedLinksBlock || undefined);
 			}
 		} catch (error) {
 			// Log warning but continue task creation - graceful degradation (T018)
 			console.warn(`Failed to generate Obsidian URI for task: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
+		// If no URI was generated but we have extracted links, still populate description
+		if (!description && processed.extractedLinksBlock) {
+			description = processed.extractedLinksBlock;
+		}
+
 		// Create task on CalDAV server with optional description (T017, T038)
 		const caldavTask = await this.client.createTask(
-			vtodoData.summary,
+			processed.summary,
 			vtodoData.due,
 			vtodoData.status,
 			description
@@ -707,6 +716,10 @@ export class SyncEngine {
 		// Convert task to VTODO format
 		const vtodoData = taskToVTODO(task);
 
+		// Process hyperlinks for the summary only (005-hyperlink-sync-config)
+		// DESCRIPTION is preserved by the property preservation pattern (feature 002)
+		const processed = processDescription(vtodoData.summary, this.config.hyperlinkSyncMode);
+
 		// Get the stored CalDAV metadata from mapping
 		const caldavUid = mapping.caldavUid;
 		const caldavEtag = mapping.caldavEtag;
@@ -715,7 +728,7 @@ export class SyncEngine {
 		// T029-T030: Update task using property preservation pattern
 		const updatedTask = await this.client.updateTaskWithPreservation(
 			caldavUid,
-			vtodoData.summary,
+			processed.summary,
 			vtodoData.due,
 			vtodoData.status,
 			caldavEtag,
@@ -752,12 +765,37 @@ export class SyncEngine {
 		// Convert CalDAV task to Obsidian format
 		const updatedData = vtodoToTask(caldavTask);
 
+		// 005-hyperlink-sync-config: Preserve hyperlinks on the inbound path.
+		// Hyperlink processing is one-way (Obsidian → CalDAV only).  When we
+		// originally pushed the task we may have stripped or moved hyperlinks
+		// out of the summary; pulling that processed summary back would
+		// silently destroy the hyperlinks in Obsidian.
+		//
+		// Guard: re-derive what we sent last time.  If the CalDAV summary
+		// still matches that derived value the user did not edit the text in
+		// their CalDAV client — keep the Obsidian description as the source
+		// of truth.  Only adopt the CalDAV summary when it has genuinely
+		// diverged (i.e. the user made an edit in their CalDAV app).
+		let effectiveDescription = updatedData.description;
+		if (this.config.hyperlinkSyncMode !== HyperlinkSyncMode.Keep) {
+			const { summary: expectedCalDAVSummary } = processDescription(
+				task.description,
+				this.config.hyperlinkSyncMode
+			);
+			if (updatedData.description === expectedCalDAVSummary) {
+				effectiveDescription = task.description;
+				Logger.debug(
+					`Preserved Obsidian hyperlinks for task ${task.blockId} (CalDAV summary unchanged)`
+				);
+			}
+		}
+
 		// Update task in vault (uses Tasks Plugin API if available)
 		await updateTaskInVault(
 			this.app,
 			this.vault,
 			task,
-			updatedData.description,
+			effectiveDescription,
 			updatedData.dueDate,
 			updatedData.status
 		);

@@ -91,7 +91,8 @@ export function buildDescriptionWithURI(
 	uri: string,
 	existingContent?: string
 ): string {
-	// For initial implementation, assume no existing content
-	// Future enhancement: preserve existing content if present
+	if (existingContent) {
+		return `${existingContent}\n\nObsidian Link: ${uri}`;
+	}
 	return `\n\nObsidian Link: ${uri}`;
 }

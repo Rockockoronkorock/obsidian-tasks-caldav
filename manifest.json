@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-tasks-caldev",
 	"name": "CalDAV Task Sync",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"minAppVersion": "0.15.0",
 	"description": "Bidirectionally sync Obsidian tasks with CalDAV servers. Supports automatic background sync with configurable intervals and filtering.",
 	"author": "rocko",

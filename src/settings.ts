@@ -1,4 +1,4 @@
-import { CalDAVConfiguration } from "./types";
+import { CalDAVConfiguration, HyperlinkSyncMode } from "./types";
 
 /**
  * Default settings for CalDAV Task Synchronization
@@ -24,4 +24,7 @@ export const DEFAULT_SETTINGS: CalDAVConfiguration = {
 
 	// Logging settings
 	enableDebugLogging: false,
+
+	// Hyperlink sync settings
+	hyperlinkSyncMode: HyperlinkSyncMode.Keep,
 };
